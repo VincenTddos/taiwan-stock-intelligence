@@ -1,0 +1,69 @@
+@import "tailwindcss";
+
+/*
+ * Design tokens.
+ *
+ * Two things here are Taiwan-market specific and deliberate:
+ *   --up / --down are RED for up and GREEN for down, the opposite of US
+ *     convention. Getting this backwards would make every chart actively
+ *     misleading to the intended user.
+ *   Tabular numerals everywhere numbers appear, so columns of prices align
+ *     for scanning rather than shifting per digit width.
+ */
+@theme {
+  --color-bg: #0a0c10;
+  --color-surface: #12151c;
+  --color-surface-2: #181c25;
+  --color-border: #232936;
+  --color-fg: #e6e9ef;
+  --color-fg-muted: #8b94a7;
+  --color-fg-subtle: #5c6577;
+
+  --color-accent: #4b8dff;
+  --color-up: #e0364a;      /* 台股慣例：紅漲 */
+  --color-down: #16a34a;    /* 台股慣例：綠跌 */
+  --color-flat: #8b94a7;
+
+  --color-ok: #22c55e;
+  --color-warn: #f59e0b;
+  --color-bad: #ef4444;
+  --color-off: #6b7280;
+
+  --font-mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace;
+}
+
+:root {
+  color-scheme: dark;
+}
+
+html,
+body {
+  background: var(--color-bg);
+  color: var(--color-fg);
+  -webkit-font-smoothing: antialiased;
+}
+
+.tabular {
+  font-variant-numeric: tabular-nums;
+  font-family: var(--font-mono);
+}
+
+/* Status dot used across the health dashboard. */
+.dot {
+  display: inline-block;
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 9999px;
+  flex-shrink: 0;
+}
+
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+.dot-live { animation: pulse-dot 2s ease-in-out infinite; }
+
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: var(--color-bg); }
+::-webkit-scrollbar-thumb { background: var(--color-border); border-radius: 5px; }
+::-webkit-scrollbar-thumb:hover { background: var(--color-fg-subtle); }

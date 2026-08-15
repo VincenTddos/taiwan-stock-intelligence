@@ -1,0 +1,50 @@
+# ---------------------------------------------------------------- secrets
+# Never commit these. CI additionally runs gitleaks.
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+secrets/
+
+# ---------------------------------------------------------------- python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+
+# ------------------------------------------------------------------ node
+node_modules/
+.next/
+out/
+.turbo/
+*.tsbuildinfo
+next-env.d.ts
+
+# ------------------------------------------------------------------ data
+# Market data, model artifacts and backups are large, regenerable, and in some
+# cases licence-restricted. They live outside version control by policy.
+data/
+raw/
+models/
+artifacts/
+backups/
+*.dump
+*.parquet
+*.duckdb
+
+# ------------------------------------------------------------------- misc
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.log
