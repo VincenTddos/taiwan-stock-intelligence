@@ -3,8 +3,13 @@
 FROM node:22-alpine AS deps
 WORKDIR /app
 RUN corepack enable
-COPY package.json pnpm-lock.yaml* ./
-RUN pnpm install --frozen-lockfile || pnpm install
+# No `pnpm-lock.yaml*` glob and no `|| pnpm install` fallback. Both were ways
+# of saying "carry on even if the lockfile is missing or stale", which turns a
+# reproducible build into whatever the registry happened to resolve that day —
+# and does it silently, so the image looks fine. If the lockfile is out of sync
+# the build should stop and someone should regenerate it.
+COPY package.json pnpm-lock.yaml ./
+RUN pnpm install --frozen-lockfile
 
 FROM node:22-alpine AS builder
 WORKDIR /app

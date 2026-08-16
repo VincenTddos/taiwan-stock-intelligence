@@ -91,6 +91,13 @@ jobs:
         uses: astral-sh/setup-uv@v4
         with:
           enable-cache: true
+          # The cache key is hashed from a dependency file. The default globs
+          # look for `uv.lock` or `requirements*.txt`, and this project has
+          # neither — dependencies are declared in pyproject.toml and installed
+          # with `uv pip install -e`. Without this the action fails outright
+          # with "No file matched to [**/uv.lock]", which is what took the
+          # backend job down on the first real CI run.
+          cache-dependency-glob: "backend/pyproject.toml"
 
       - name: Install dependencies
         working-directory: backend
@@ -161,9 +168,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # No `version:` input. The version now comes from the `packageManager`
+      # field in web/package.json, which corepack and this action both read —
+      # so CI, the Docker build and a developer's laptop all resolve the same
+      # pnpm. Specifying it in both places makes the action fail with
+      # "Multiple versions of pnpm specified".
       - uses: pnpm/action-setup@v4
-        with:
-          version: 9
 
       - uses: actions/setup-node@v4
         with:

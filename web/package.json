@@ -2,6 +2,10 @@
   "name": "twquant-web",
   "version": "0.1.0",
   "private": true,
+  "packageManager": "pnpm@9.15.9",
+  "pnpm": {
+    "onlyBuiltDependencies": ["esbuild", "sharp", "unrs-resolver"]
+  },
   "scripts": {
     "dev": "next dev -p 3000",
     "build": "next build",
