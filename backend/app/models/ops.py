@@ -23,13 +23,12 @@ from sqlalchemy import (
     SmallInteger,
     String,
     Text,
-    UniqueConstraint,
     func,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.db.base import Base
+from app.db.base import Base, provenance_column
 
 
 class SourceStatus(StrEnum):
@@ -98,9 +97,7 @@ class DataSource(Base):
     max_concurrency: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=2)
     min_interval_ms: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
-    timeout_seconds: Mapped[float] = mapped_column(
-        Numeric(6, 2), nullable=False, default=20
-    )
+    timeout_seconds: Mapped[float] = mapped_column(Numeric(6, 2), nullable=False, default=20)
     max_retries: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=3)
 
     status: Mapped[str] = mapped_column(String(20), nullable=False, default=SourceStatus.ACTIVE)
@@ -208,7 +205,7 @@ class DataQuarantine(Base):
     errors: Mapped[list[dict[str, object]]] = mapped_column(JSONB, nullable=False)
     severity: Mapped[str] = mapped_column(String(10), nullable=False, default="FATAL")
 
-    ingestion_id: Mapped[int | None] = mapped_column(BigInteger)
+    ingestion_id: Mapped[int | None] = provenance_column()
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
@@ -255,9 +252,7 @@ class DataFreshness(Base):
     expected_next_update: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     record_count: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
-    status: Mapped[str] = mapped_column(
-        String(20), nullable=False, default=FreshnessStatus.MISSING
-    )
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default=FreshnessStatus.MISSING)
     lag_minutes: Mapped[int | None] = mapped_column(Integer)
     detail: Mapped[dict[str, object] | None] = mapped_column(JSONB)
 
@@ -359,7 +354,7 @@ class IngestionMetric(Base):
     records_quarantined: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     rows_per_second: Mapped[float | None] = mapped_column(Numeric(12, 2))
 
-    ingestion_id: Mapped[int | None] = mapped_column(BigInteger)
+    ingestion_id: Mapped[int | None] = provenance_column()
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

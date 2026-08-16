@@ -10,7 +10,7 @@
 Market Data Infrastructure 已完整建置並跑通：provider 抽象、registry、交易日曆、
 canonical model、驗證、quarantine、provenance、freshness、availability、
 rate limiter、可續跑 backfill、market API、Redis 快取，
-**全部用真實 TWSE 回應端到端驗證過**。215 個測試通過、覆蓋率 85%、
+**全部用真實 TWSE 回應端到端驗證過**。217 個測試通過、覆蓋率 85%、
 `ruff` 與 `mypy --strict` 零告警、migration 可逆且無 drift。
 
 **一個環境限制**：這個雲端容器的對外連線被允許清單阻擋，
@@ -220,6 +220,10 @@ migration `0003_market_data_infrastructure` 新增 13 張表（總計 18 張）�
 **Operations**：`data_sources` `raw_ingestions` `data_quarantine` `data_freshness`
 `backfill_checkpoints` `ingestion_metrics`
 
+migration `0004_enforce_provenance_fk` 不新增表，把七張表的 `ingestion_id`
+從裸整數改成指向 `raw_ingestions.id` 的外鍵（`ON DELETE SET NULL`）。
+理由見 §13 第 7 項。
+
 驗證：`upgrade head` → `downgrade -1` → `upgrade head` 全部成功，`alembic check` 無 drift。
 
 ### 幾個刻意的設計
@@ -344,7 +348,7 @@ curl -s localhost:8000/api/v1/market/data-operations | jq '.data.overall, .data.
 
 ## 13. 這一階段被測試抓到的缺陷
 
-六個，都在寫完之後、commit 之前被抓到：
+七個，都在寫完之後、push 之前被抓到：
 
 | # | 缺陷 | 為什麼危險 |
 |---|------|-----------|
@@ -354,6 +358,7 @@ curl -s localhost:8000/api/v1/market/data-operations | jq '.data.overall, .data.
 | 4 | **point-in-time 過濾器包含 `ingested_at`** | 十年回補讓每筆歷史資料的 `ingested_at` 都是今天，於是任何對過去的查詢都回傳空 —— 一個看起來正確的防護變成靜默的空回測 |
 | 5 | **多列 upsert 對異質 key 崩潰** | 三大法人的 DEALER/TOTAL 只有 net，其餘有 buy/sell。SQLAlchemy 從第一列推導欄位，缺欄位的列直接編譯失敗 |
 | 6 | **`.gitignore` 吞掉整個 models 套件**（Phase 1 遺留） | `models/` 沒有前導斜線，會在**任何深度**比對，於是 `backend/app/models/` 從 Phase 1 起就不在版控裡。`git status` 全綠、本機測試全過，但 clean clone 根本 import 不起來 |
+| 7 | **provenance 只是慣例，不是約束** | 七張表的 `ingestion_id` 是裸 BigInteger，沒有 FK。「每個數字都能追回原始 bytes」全靠每個寫入者自己記得 —— 指向不存在的 ingestion，資料庫照收 |
 
 第 6 項不是這個 Phase 寫壞的，是 commit 前逐項檢查 `git ls-files` 時，發現
 `v0.1.0-phase1` 這個 tag 裡**一個 ORM model 都沒有**。
@@ -366,8 +371,23 @@ remote 列為 Phase 3 的前置而不是雜項。
 
 修法是把 data 區段的 pattern 全部錨定到 repo root（`/models/`），ML artefact 的
 兩個實際落點單獨列出。修完之後補了一道本機也能跑的驗證：`git clone` 到乾淨目錄
-→ import → 跑完整測試，**215 passed / 3 skipped**。收進 `make clone-check`，
-併入 `make check`，以後每個 Phase gate 都跑，不依賴 remote 是否存在。
+→ import → 跑完整測試。收進 `make clone-check`，併入 `make check`，以後每個
+Phase gate 都跑，不依賴 remote 是否存在。
+
+**第 7 項是第 6 項的連鎖後果。** ruff 預設遵守 `.gitignore`，所以 models 套件
+從來沒有被 lint 過。解除忽略之後 ruff 立刻報了三個未使用的 import，其中
+`ForeignKey` 特別刺眼 —— 它被 import 是因為當初打算加，但七張表的 `ingestion_id`
+最後都是裸 `BigInteger`。也就是說 Phase 2 最核心的那句話（「沒有來源就不會有數字」）
+在資料庫層面**沒有任何東西在守**。
+
+補在 migration `0004`：七個 FK 指向 `raw_ingestions.id`，`ON DELETE SET NULL`
+而非 `RESTRICT` —— raw payload 是庫裡最肥的東西，清理是合理維運，不該連帶刪掉行情。
+刪掉來源時 canonical row 存活、指標歸 NULL、`source` 與 `ingested_at` 保留，
+從「這是當初的原始 bytes」誠實降級為「來自哪裡、何時進來」，而不是指向一個不存在的
+東西。兩個新測試各守一邊：懸空 `ingestion_id` 被 DB 擋下（`IntegrityError`）、
+清理 raw payload 後價格還在而指標已清空。
+
+**217 passed / 3 skipped**（新增 2 個）。
 
 另外，DB 的 OHLC CHECK 約束在測試中**擋下了測試腳本自己嘗試寫入的錯誤值** ——
 約束在做它該做的事。

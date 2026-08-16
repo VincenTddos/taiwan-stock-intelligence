@@ -30,11 +30,9 @@ from sqlalchemy import (
     CheckConstraint,
     Date,
     DateTime,
-    ForeignKey,
     Index,
     Integer,
     Numeric,
-    SmallInteger,
     String,
     Text,
     UniqueConstraint,
@@ -44,7 +42,7 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.db.base import Base
+from app.db.base import Base, provenance_column
 
 # Money keeps four decimal places: TWSE quotes to two, but adjusted prices
 # accumulate factors and would lose cents to rounding at two.
@@ -97,9 +95,7 @@ class TradingCalendar(Base):
     calendar_date: Mapped[date] = mapped_column(Date, primary_key=True)
 
     is_trading_day: Mapped[bool] = mapped_column(Boolean, nullable=False)
-    session_type: Mapped[str] = mapped_column(
-        String(20), nullable=False, default=SessionType.FULL
-    )
+    session_type: Mapped[str] = mapped_column(String(20), nullable=False, default=SessionType.FULL)
     holiday_name: Mapped[str | None] = mapped_column(String(100))
     description: Mapped[str | None] = mapped_column(Text)
 
@@ -170,7 +166,7 @@ class StockMaster(Base):
     attributes: Mapped[dict[str, object] | None] = mapped_column(JSONB)
 
     source: Mapped[str] = mapped_column(String(20), nullable=False)
-    ingestion_id: Mapped[int | None] = mapped_column(BigInteger)
+    ingestion_id: Mapped[int | None] = provenance_column()
     ingested_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
@@ -178,9 +174,7 @@ class StockMaster(Base):
     __table_args__ = (
         CheckConstraint(r"symbol ~ '^[0-9A-Z]{4,10}$'", name="symbol_format"),
         CheckConstraint("valid_to IS NULL OR valid_to > valid_from", name="validity_window"),
-        CheckConstraint(
-            "status IN ('LISTED','SUSPENDED','DELISTED')", name="status_allowed"
-        ),
+        CheckConstraint("status IN ('LISTED','SUSPENDED','DELISTED')", name="status_allowed"),
         # At most one current row per symbol+market. A partial unique index,
         # because a plain constraint over (symbol, market, valid_to) would not
         # collide: NULL never equals NULL in SQL.
@@ -239,7 +233,7 @@ class DailyPrice(Base):
     quality_flags: Mapped[list[str] | None] = mapped_column(JSONB)
 
     source: Mapped[str] = mapped_column(String(20), nullable=False)
-    ingestion_id: Mapped[int | None] = mapped_column(BigInteger)
+    ingestion_id: Mapped[int | None] = provenance_column()
     ingested_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
@@ -254,9 +248,7 @@ class DailyPrice(Base):
         ),
         # OHLC coherence is a *database* invariant. A row that violates it is not
         # stored at all — it goes to quarantine, where it can be inspected.
-        CheckConstraint(
-            "high IS NULL OR low IS NULL OR high >= low", name="high_ge_low"
-        ),
+        CheckConstraint("high IS NULL OR low IS NULL OR high >= low", name="high_ge_low"),
         CheckConstraint("high IS NULL OR open IS NULL OR high >= open", name="high_ge_open"),
         CheckConstraint("high IS NULL OR close IS NULL OR high >= close", name="high_ge_close"),
         CheckConstraint("low IS NULL OR open IS NULL OR low <= open", name="low_le_open"),
@@ -295,7 +287,7 @@ class IndexQuote(Base):
         String(10), nullable=False, default=QualityStatus.OK
     )
     source: Mapped[str] = mapped_column(String(20), nullable=False)
-    ingestion_id: Mapped[int | None] = mapped_column(BigInteger)
+    ingestion_id: Mapped[int | None] = provenance_column()
     ingested_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
@@ -341,7 +333,7 @@ class InstitutionalFlow(Base):
         String(10), nullable=False, default=QualityStatus.OK
     )
     source: Mapped[str] = mapped_column(String(20), nullable=False)
-    ingestion_id: Mapped[int | None] = mapped_column(BigInteger)
+    ingestion_id: Mapped[int | None] = provenance_column()
     ingested_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
@@ -381,9 +373,7 @@ class CorporateAction(Base):
 
     ex_date: Mapped[date] = mapped_column(Date, nullable=False)
     announced_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    announced_at_is_estimated: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, default=False
-    )
+    announced_at_is_estimated: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     payment_date: Mapped[date | None] = mapped_column(Date)
     record_date: Mapped[date | None] = mapped_column(Date)
 
@@ -398,7 +388,7 @@ class CorporateAction(Base):
     factor: Mapped[Decimal] = mapped_column(RATIO, nullable=False, default=Decimal(1))
 
     source: Mapped[str] = mapped_column(String(20), nullable=False)
-    ingestion_id: Mapped[int | None] = mapped_column(BigInteger)
+    ingestion_id: Mapped[int | None] = provenance_column()
     ingested_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

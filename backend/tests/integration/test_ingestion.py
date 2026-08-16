@@ -17,6 +17,7 @@ from decimal import Decimal
 
 import pytest
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 
 from app.ingest import jobs
 from app.ingest.pipeline import IngestionPipeline
@@ -383,6 +384,62 @@ class TestProvenance:
         ).scalar_one()
         assert ingestion.transport == "REPLAY"
         assert ingestion.source == "TWSE"
+
+    async def test_the_provenance_link_is_enforced_by_the_database(
+        self, session, registry, calendar_ready
+    ):
+        """A row may not claim an ingestion that does not exist.
+
+        Before this constraint existed the link was a convention: nothing
+        stopped an `ingestion_id` pointing into empty space, so "every value
+        traces back to recorded bytes" was true only for as long as every
+        writer remembered to make it true.
+        """
+        await jobs.ingest_daily_prices(session, registry)
+        await session.commit()
+
+        row = (await session.execute(select(DailyPrice).limit(1))).scalar_one()
+        missing = (
+            await session.execute(select(func.coalesce(func.max(RawIngestion.id), 0)))
+        ).scalar_one() + 1_000
+
+        row.ingestion_id = missing
+        with pytest.raises(IntegrityError):
+            await session.commit()
+        await session.rollback()
+
+    async def test_pruning_raw_payloads_keeps_the_data_and_drops_the_pointer(
+        self, session, registry, calendar_ready
+    ):
+        """Raw payloads are the bulkiest thing here and pruning them is a
+        legitimate retention decision. It must not delete market data, and it
+        must not leave a pointer to a row that is gone — the price survives
+        with its source and timestamp, and the byte-level trail is honestly
+        absent rather than dangling.
+        """
+        await jobs.ingest_daily_prices(session, registry)
+        await session.commit()
+
+        row = (await session.execute(select(DailyPrice).limit(1))).scalar_one()
+        symbol, trading_date = row.symbol, row.trading_date
+        ingestion = await session.get(RawIngestion, row.ingestion_id)
+
+        await session.delete(ingestion)
+        await session.commit()
+        session.expire_all()
+
+        survivor = (
+            await session.execute(
+                select(DailyPrice).where(
+                    DailyPrice.symbol == symbol,
+                    DailyPrice.trading_date == trading_date,
+                )
+            )
+        ).scalar_one()
+        assert survivor.close is not None, "pruning raw bytes must not delete the price"
+        assert survivor.source == "TWSE", "where it came from survives the prune"
+        assert survivor.ingested_at is not None, "when it arrived survives the prune"
+        assert survivor.ingestion_id is None, "the pointer is cleared, not left dangling"
 
 
 # ==================================================== corporate actions
