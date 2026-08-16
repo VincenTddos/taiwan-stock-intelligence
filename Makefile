@@ -111,10 +111,26 @@ openapi: ## Export the OpenAPI schema and regenerate frontend types
 	cd $(WEB) && pnpm gen:api
 
 # ---------------------------------------------------------------- gate
+.PHONY: clone-check
+clone-check: ## Verify a clean clone actually imports (catches .gitignore holes)
+	@# Every other check runs against the working tree, so a file that exists on
+	@# disk but was never committed passes all of them. A stray `models/` pattern
+	@# hid the entire ORM package for a whole phase exactly this way.
+	@rm -rf /tmp/twquant-clonecheck
+	@git clone -q . /tmp/twquant-clonecheck
+	@ln -s "$(PWD)/$(BACKEND)/.venv" /tmp/twquant-clonecheck/backend/.venv
+	@cp $(BACKEND)/.env /tmp/twquant-clonecheck/backend/.env 2>/dev/null || true
+	@cd /tmp/twquant-clonecheck/backend && . .venv/bin/activate && \
+		PYTHONPATH=/tmp/twquant-clonecheck/backend python -c \
+		"from app.main import create_app; from app.db.base import Base; \
+		 import app.models.market, app.models.ops, app.models.user, app.models.platform; \
+		 assert create_app(); print(f'  clean clone imports — {len(Base.metadata.tables)} tables')"
+	@rm -rf /tmp/twquant-clonecheck
+
 .PHONY: check
-check: lint typecheck test migrate-check ## The full Phase gate — everything CI runs
+check: lint typecheck test migrate-check clone-check ## The full Phase gate — everything CI runs
 	@echo ""
-	@echo "  ✓ lint · typecheck · tests · migrations"
+	@echo "  ✓ lint · typecheck · tests · migrations · clean clone"
 	@echo "  Phase gate passed."
 
 # ---------------------------------------------------------------- verify

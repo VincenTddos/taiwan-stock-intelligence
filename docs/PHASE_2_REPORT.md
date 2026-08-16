@@ -344,7 +344,7 @@ curl -s localhost:8000/api/v1/market/data-operations | jq '.data.overall, .data.
 
 ## 13. 這一階段被測試抓到的缺陷
 
-五個，都在寫完之後、commit 之前被抓到：
+六個，都在寫完之後、commit 之前被抓到：
 
 | # | 缺陷 | 為什麼危險 |
 |---|------|-----------|
@@ -353,6 +353,21 @@ curl -s localhost:8000/api/v1/market/data-operations | jq '.data.overall, .data.
 | 3 | **`valid_from` 用了上市日期** | 把知曉時間和事件時間搞混 —— SCD2 查 1990 年會回傳 2026 年才知道的資料。正是這整套設計要防的錯 |
 | 4 | **point-in-time 過濾器包含 `ingested_at`** | 十年回補讓每筆歷史資料的 `ingested_at` 都是今天，於是任何對過去的查詢都回傳空 —— 一個看起來正確的防護變成靜默的空回測 |
 | 5 | **多列 upsert 對異質 key 崩潰** | 三大法人的 DEALER/TOTAL 只有 net，其餘有 buy/sell。SQLAlchemy 從第一列推導欄位，缺欄位的列直接編譯失敗 |
+| 6 | **`.gitignore` 吞掉整個 models 套件**（Phase 1 遺留） | `models/` 沒有前導斜線，會在**任何深度**比對，於是 `backend/app/models/` 從 Phase 1 起就不在版控裡。`git status` 全綠、本機測試全過，但 clean clone 根本 import 不起來 |
+
+第 6 項不是這個 Phase 寫壞的，是 commit 前逐項檢查 `git ls-files` 時，發現
+`v0.1.0-phase1` 這個 tag 裡**一個 ORM model 都沒有**。
+
+值得記下的是**為什麼沒被抓到**。CI 是對 `actions/checkout` 的內容跑的，也就是
+版控裡的內容 —— 這個缺陷 CI 一跑就會炸。但 remote 還沒設定，所以 CI 從來沒有真的
+執行過一次；到目前為止唯一的驗證管道是本機 working tree，而 working tree 裡檔案
+是在的。這是「CI 設定好了」和「CI 跑過了」之間的差別，也是為什麼下面 §14 把設定
+remote 列為 Phase 3 的前置而不是雜項。
+
+修法是把 data 區段的 pattern 全部錨定到 repo root（`/models/`），ML artefact 的
+兩個實際落點單獨列出。修完之後補了一道本機也能跑的驗證：`git clone` 到乾淨目錄
+→ import → 跑完整測試，**215 passed / 3 skipped**。收進 `make clone-check`，
+併入 `make check`，以後每個 Phase gate 都跑，不依賴 remote 是否存在。
 
 另外，DB 的 OHLC CHECK 約束在測試中**擋下了測試腳本自己嘗試寫入的錯誤值** ——
 約束在做它該做的事。
@@ -374,10 +389,13 @@ Phase 3（Quant Engine）需要的 canonical 資料，Phase 2 是否備妥：
 | `DataAvailability` | ✅ `as_of` 可見性服務完成，Phase 6 回測直接消費 |
 | Feature Contract | ⏳ Phase 3 建立（依你的指示，Phase 3 先建 Feature/Factor Contract 與時序慣例） |
 
-### Phase 3 開始前的兩個前置
+### Phase 3 開始前的三個前置
 
 1. **解除 L1** —— 沒有真實資料量，因子的 IC 檢定沒有意義
 2. **Corporate actions 來源** —— 沒有還原價，MA、動能、報酬序列全部會在除權息日出現假跳空
+3. **設定 GitHub remote 並 push** —— CI 已經寫好但一次都沒真的跑過。§13 第 6 項就是
+   這個空窗期漏掉的：一個 CI 一跑就會炸的缺陷，安靜地活過了整個 Phase 1。
+   我需要 owner 才能組出完整 URL（見 §16）
 
 ---
 
@@ -412,7 +430,7 @@ Phase 3（Quant Engine）需要的 canonical 資料，Phase 2 是否備妥：
 | 25 | Backtest availability tests | ✅ | `available_at` 用知曉時間 |
 | 26 | No fake production data | ✅ | `ALLOW_MOCK_DATA` + `PROVIDER_MODE` 雙重 production 防護 |
 | 27 | Documentation updated | ✅ | 本報告 + ADR 重整 + fixtures README |
-| 28 | CI green | ⏳ | 每個步驟本地逐一通過；**待推上 GitHub** |
+| 28 | CI green | ⏳ | 每個步驟本地逐一通過（含新增的 clean-clone 驗證）；**待推上 GitHub 才算真的綠** |
 
 **24 項完成、2 項待你提供 GitHub owner、1 項需外部來源、1 項需 CI 環境。**
 
