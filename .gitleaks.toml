@@ -1,0 +1,40 @@
+# gitleaks configuration
+#
+# The secret scanner runs on every push and blocks the build when it finds
+# something. On the first CI run it found three things, all of them fake: the
+# JWT signing key CI uses for its throwaway database, and a test constant used
+# to prove that a token signed with the wrong key is rejected.
+#
+# They are allowlisted by their exact literal value, not by file path and not by
+# rule. That distinction is the whole point. Allowlisting `.github/workflows/`
+# or the `generic-api-key` rule would mean a real credential pasted into those
+# files later sails through, and the scan would keep reporting green while
+# protecting nothing — the failure mode this project has already been bitten by
+# once (see docs/PHASE_2_REPORT.md §13).
+#
+# These strings also live in git history, which is why an inline
+# `# gitleaks:allow` comment is not enough: `gitleaks detect` scans every
+# commit, so editing the current file would leave the historical blob flagged
+# forever.
+#
+# Adding to this list should feel uncomfortable. If a value here ever becomes
+# real, remove it from the list, rotate it, and rewrite the history that
+# contains it.
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Known-fake credentials used by CI and unit tests"
+regexes = [
+  # .github/workflows/ci.yml — the signing key for CI's ephemeral test
+  # database. It is committed deliberately so the workflow needs no repository
+  # secret to run, and it protects nothing that outlives a single job.
+  '''ci-secret-key-long-enough-for-validation-0123456789abcdef''',
+
+  # backend/tests/unit/test_security.py — fixtures for
+  # test_expired_token_rejected and test_token_signed_with_other_secret_rejected.
+  # Their only job is to be different from each other.
+  '''expiry-test-secret-key-long-enough-123456''',
+  '''a-completely-different-secret-key-0987654321''',
+]
