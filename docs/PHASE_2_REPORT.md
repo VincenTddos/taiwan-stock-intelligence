@@ -423,7 +423,7 @@ Phase 3（Quant Engine）需要的 canonical 資料，Phase 2 是否備妥：
 
 | # | 項目 | 狀態 | 證據 |
 |---|------|------|------|
-| 1 | GitHub remote confirmed | ⏳ | repo 名稱 `taiwan-stock-intelligence` 已收到；**仍需 owner 才能組出完整 URL**，依指示不猜測 |
+| 1 | GitHub remote confirmed | ✅ | `github.com/VincenTddos/taiwan-stock-intelligence`，`main` + 兩個 tag 已推上 |
 | 2 | Phase 1 tag preserved | ✅ | `v0.1.0-phase1` 存在 |
 | 3 | ADR-013~021 organized | ✅ | `docs/adr/` 21 份 + README；`ARCHITECTURE.md §18` 改為索引 |
 | 4 | MarketDataProvider abstraction | ✅ | 6 個必要方法 + capability + 錯誤正規化 |
@@ -450,9 +450,9 @@ Phase 3（Quant Engine）需要的 canonical 資料，Phase 2 是否備妥：
 | 25 | Backtest availability tests | ✅ | `available_at` 用知曉時間 |
 | 26 | No fake production data | ✅ | `ALLOW_MOCK_DATA` + `PROVIDER_MODE` 雙重 production 防護 |
 | 27 | Documentation updated | ✅ | 本報告 + ADR 重整 + fixtures README |
-| 28 | CI green | ⏳ | 每個步驟本地逐一通過（含新增的 clean-clone 驗證）；**待推上 GitHub 才算真的綠** |
+| 28 | CI green | ⏳ | 第一次執行紅燈，抓到 4 個本地測不到的問題（見 §17）；已修，待第二次執行確認 |
 
-**24 項完成、2 項待你提供 GitHub owner、1 項需外部來源、1 項需 CI 環境。**
+**26 項完成、1 項需外部來源（corporate actions）、1 項待 CI 第二次執行確認。**
 
 ---
 
@@ -462,7 +462,55 @@ Phase 3（Quant Engine）需要的 canonical 資料，Phase 2 是否備妥：
 
 需要你的：
 
-1. **GitHub owner** —— 給我 `https://github.com/<owner>/taiwan-stock-intelligence.git`，我設定 remote 並 push（含 tag）
-2. **在有網路的機器執行 §11**，把 `data-operations` 輸出給我，我補上實測覆蓋數字
-3. **Corporate actions 來源的決定** —— TWSE `t187ap45_L`（股利分派）是已驗證的 OpenAPI 端點，是最省事的起點；MOPS 涵蓋更全但脆弱
+1. **在有網路的機器執行 §11**，把 `data-operations` 輸出給我，我補上實測覆蓋數字
+2. **Corporate actions 來源的決定** —— TWSE `t187ap45_L`（股利分派）是已驗證的 OpenAPI 端點，是最省事的起點；MOPS 涵蓋更全但脆弱
+3. 確認 CI 第二次執行轉綠
 4. 確認後再下 Phase 3 指令
+
+---
+
+## 17. CI 第一次真的執行之後
+
+`main` 於 2026-08-16 推上 `github.com/VincenTddos/taiwan-stock-intelligence`，
+CI 首次執行。**它是紅的**，而且抓到的四件事全部是本地 gate 結構上測不到的：
+
+| 失敗 job | 錯誤 | 為什麼本地測不到 |
+|---------|------|----------------|
+| Backend | `No file matched to [**/uv.lock]` | `setup-uv` 的 cache key 要 hash 一個相依檔案，預設找 `uv.lock` / `requirements*.txt`，本專案兩者都沒有（相依寫在 `pyproject.toml`）。本地根本不跑這個 action |
+| Frontend | `ERR_PNPM_IGNORED_BUILDS` | pnpm 版本只釘在 workflow 一個地方。pnpm 10 起預設拒絕執行套件的 build script（`esbuild`/`sharp`/`unrs-resolver`）並以非零結束。本地那顆 pnpm 剛好是 9 |
+| Docker | `"/bin/sh -c pnpm install" exit code 1` | 同上，且 Dockerfile 寫了 `--frozen-lockfile \|\| pnpm install` —— 一個「lockfile 壞了也照跑」的 fallback。這個容器沒有 docker daemon，映像檔從來沒有被建置過 |
+| Secret scan | `Unexpected exit code [1]` | gitleaks 沒裝在本地 gate 裡 |
+
+四件事的共同點：**它們都不是程式碼的問題，是「這份 repo 能不能在別人的機器上從零建起來」的問題** ——
+而那正是本地 gate 定義上無法回答的。這也是 §13 第 6 項（`.gitleaks` 之外那個
+`.gitignore` 缺陷）能活過整個 Phase 1 的同一個結構性理由。
+
+### 各自的修法
+
+**pnpm 版本**改由 `web/package.json` 的 `packageManager` 欄位決定 —— corepack、
+Docker build、`pnpm/action-setup` 三者都讀它，一處釘死三處一致。三個需要 build script
+的套件用 `onlyBuiltDependencies` **逐一列名核可**，而不是全面放行所有 postinstall。
+
+**Dockerfile 拿掉 `|| pnpm install` 這個 fallback**，以及 `pnpm-lock.yaml*` 那個
+容忍 lockfile 不存在的萬用字元。兩者都是在說「lockfile 壞了也繼續」，
+把可重現的映像檔變成「當天 registry 剛好解析出什麼就是什麼」，而且悄無聲息。
+
+**gitleaks 找到三筆**，全是假的：CI 那顆用完即丟的 JWT 簽章金鑰（出現兩次）、
+以及一個用來驗證「錯誤金鑰簽的 token 會被拒絕」的測試常數。**沒有真的憑證外洩。**
+
+處理方式刻意選了最窄的一種：`.gitleaks.toml` 以**字面值**列入允許清單，
+不是以檔案路徑、也不是以規則。放行 `.github/workflows/` 或整條 `generic-api-key`
+規則，等於日後真的有人把憑證貼進那些檔案時一路綠燈通過 —— 那就變成一個
+「在保護什麼都沒保護」的掃描器，正是這個專案已經被咬過一次的形狀。
+驗證方式：在同一個檔案裡種一組 Stripe key 和 Slack token，**兩個都仍然被抓出來**。
+
+順帶一提，inline 的 `# gitleaks:allow` 註解在這裡沒用 ——
+掃描涵蓋每一個 commit，那些值留在 Phase 1 的 blob 裡，改現在的檔案沒有意義。
+
+### 這一段的結論
+
+本地 gate 現在有五道（lint、typecheck、test、migration、clean-clone），
+但**沒有一道能取代 CI**。CI 的價值不在於重跑同樣的測試，
+而在於它是在一台**沒有這個專案任何殘留狀態**的機器上，從版控裡的內容重新建起來。
+本地 gate 回答「我寫的東西對不對」，CI 回答「這份 repo 是不是完整的」。
+今天這兩個問題的答案不一樣。
