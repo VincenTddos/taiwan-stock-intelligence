@@ -31,7 +31,7 @@
 15. [Deployment Strategy](#15-deployment-strategy)
 16. [Scaling Strategy](#16-scaling-strategy)
 17. [十個架構決策問題的回答](#17-十個架構決策問題的回答)
-18. [Architecture Decision Records](#18-architecture-decision-records)
+18. [Architecture Decision Index](#18-architecture-decision-index)
 
 ---
 
@@ -991,10 +991,41 @@ q_maint      備份/監控/清理（最低優先）
 
 ---
 
-## 18. Architecture Decision Records
+## 18. Architecture Decision Index
 
-| ADR | 決策 | 理由 | 被推翻的條件 |
-|-----|------|------|-------------|
+Each decision is recorded as its own document under [`docs/adr/`](adr/), which
+holds the full context, rationale, consequences and the condition under which
+the decision should be revisited. This section is an index only — it is
+deliberately not a copy.
+
+| ADR | Title | Status | Decision | |
+|-----|-------|--------|----------|---|
+| **001** | Single PostgreSQL for relational, time-series and vector data | Accepted | One PostgreSQL instance carries relational, time-series and vector workloads. | [→](adr/ADR-001-single-postgresql-for-relational-time-series-and-vector-data.md) |
+| **002** | Celery with a Redis broker, rather than RQ or Dramatiq | Accepted | Background work runs on Celery with Redis as broker and result backend. | [→](adr/ADR-002-celery-with-a-redis-broker-rather-than-rq-or-dramatiq.md) |
+| **003** | FastAPI, Pydantic v2 and SQLAlchemy 2.0 | Accepted | Backend is FastAPI + Pydantic v2 + SQLAlchemy 2.0 async + Alembic. | [→](adr/ADR-003-fastapi-pydantic-v2-and-sqlalchemy-20.md) |
+| **004** | Next.js App Router with client-side data fetching | Accepted | Next.js App Router, but data is fetched client-side via TanStack Query. | [→](adr/ADR-004-nextjs-app-router-with-client-side-data-fetching.md) |
+| **005** | The LLM does not participate in numeric calculation | Accepted | The LLM never computes a number that is stored or displayed as a measurement. | [→](adr/ADR-005-the-llm-does-not-participate-in-numeric-calculation.md) |
+| **006** | Dictionary-first entity recognition, with the LLM as reinforcement | Accepted | Entity recognition matches an exchange-derived alias dictionary first; the LLM only supplements. | [→](adr/ADR-006-dictionary-first-entity-recognition-with-the-llm-as-reinforc.md) |
+| **007** | Bitemporal fundamental data | Accepted | Fundamental records store both `period_end` and `announced_at`; history filters on the latter. | [→](adr/ADR-007-bitemporal-fundamental-data.md) |
+| **008** | The supply-chain graph lives in PostgreSQL, not Neo4j | Accepted | The supply-chain graph is Postgres tables traversed with recursive CTEs, not Neo4j. | [→](adr/ADR-008-the-supply-chain-graph-lives-in-postgresql-not-neo4j.md) |
+| **009** | LightGBM as the first-stage model | Accepted | The first ML models are LightGBM, not sequence models. | [→](adr/ADR-009-lightgbm-as-the-first-stage-model.md) |
+| **010** | No order execution | Accepted | The platform does not connect to brokers and does not place orders. | [→](adr/ADR-010-no-order-execution.md) |
+| **011** | The LLM is an optional service | Accepted | Ollama is opt-in; core works unchanged with `ENABLE_LLM=false`. | [→](adr/ADR-011-the-llm-is-an-optional-service.md) |
+| **012** | Red for up, green for down | Accepted | Red means up and green means down, following Taiwanese market convention. | [→](adr/ADR-012-red-for-up-green-for-down.md) |
+| **013** | One Docker image for API, worker, beat and Flower | Accepted | API, worker, beat and Flower run from one image, differing only by command. | [→](adr/ADR-013-one-docker-image-for-api-worker-beat-and-flower.md) |
+| **014** | Migrations run as a one-shot compose service | Accepted | `alembic upgrade head` runs as a one-shot service that must exit zero before anything starts. | [→](adr/ADR-014-migrations-run-as-a-one-shot-compose-service.md) |
+| **015** | TimescaleDB is created conditionally and enforced by configuration | Accepted | TimescaleDB is created only when available; `REQUIRE_TIMESCALEDB` makes it mandatory outside local/test. | [→](adr/ADR-015-timescaledb-is-created-conditionally-and-enforced-by-configu.md) |
+| **016** | Cache namespace versions start at zero | Accepted | A missing cache-version counter reads as 0, so the first invalidation is not a no-op. | [→](adr/ADR-016-cache-namespace-versions-start-at-zero.md) |
+| **017** | Module boundaries are enforced by the linter | Accepted | `ruff` bans importing `app.api` from lower layers, so the layering cannot silently rot. | [→](adr/ADR-017-module-boundaries-are-enforced-by-the-linter.md) |
+| **018** | Database health probes run sequentially | Accepted | Database health probes run sequentially; one AsyncSession cannot serve concurrent statements. | [→](adr/ADR-018-database-health-probes-run-sequentially.md) |
+| **019** | `disabled` is a first-class health status, distinct from `degraded` | Accepted | An intentionally-disabled component reports `disabled` and never degrades system status. | [→](adr/ADR-019-disabled-is-a-first-class-health-status-distinct-from-degrad.md) |
+| **020** | Refresh tokens rotate on use and are revocable | Accepted | Refresh tokens rotate on use and land on a Redis denylist, making theft detectable and logout real. | [→](adr/ADR-020-refresh-tokens-rotate-on-use-and-are-revocable.md) |
+| **021** | The dashboard shows empty states, never placeholder numbers | Accepted | Panels without a data source render an empty state — never a sample number, never a zero. | [→](adr/ADR-021-the-dashboard-shows-empty-states-never-placeholder-numbers.md) |
+
+**Phase 0** produced ADR-001 – ADR-012 (system shape and principles). **Phase 1** produced ADR-013 – ADR-021 (decisions forced by building it, three of which were prompted by defects the test suite found).
+
+Adding a decision: copy the structure of an existing file, take the next number, and add one row here. A decision worth arguing about later is worth a file; a decision nobody will question does not need one.
+-----|------|------|-------------|
 | ADR-001 | 單一 PostgreSQL 承載關聯 + 時序 + 向量 | 單機省資源；跨域 JOIN 是本產品的核心查詢型態 | 向量 > 500 萬且檢索 > 200ms；或時序 > 5 億列 |
 | ADR-002 | Celery + Redis 而非 RQ / Dramatiq | beat 排程成熟、Flower 可觀測、社群大 | 若只剩 < 5 個 job 可簡化為 APScheduler |
 | ADR-003 | FastAPI + Pydantic v2 + SQLAlchemy 2.0 | 型別安全、自動 OpenAPI、async 原生 | 無 |
