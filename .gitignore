@@ -32,11 +32,19 @@ next-env.d.ts
 # ------------------------------------------------------------------ data
 # Market data, model artifacts and backups are large, regenerable, and in some
 # cases licence-restricted. They live outside version control by policy.
-data/
-raw/
-models/
-artifacts/
-backups/
+#
+# These are anchored to the repository root on purpose. An unanchored `models/`
+# matches at ANY depth, and it silently swallowed `backend/app/models/` — the
+# entire SQLAlchemy layer — through the whole of Phase 1. A clean clone would
+# not have imported. Keep the leading slash.
+/data/
+/raw/
+/models/
+/artifacts/
+/backups/
+# ML artefacts written next to the code they belong to:
+backend/models/
+backend/app/ml/models/
 *.dump
 *.parquet
 *.duckdb
