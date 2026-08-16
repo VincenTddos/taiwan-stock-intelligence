@@ -3,7 +3,13 @@ name: CI
 on:
   pull_request:
   push:
-    branches: [main]
+    # `main` is the default branch. `master` is listed too because the repo was
+    # initialised locally before the remote existed, and a branch-name mismatch
+    # here fails silently: the push succeeds, no workflow runs, and the badge
+    # stays blank rather than red. Phase 2 already lost a defect to CI that was
+    # configured but never executed — see PHASE_2_REPORT §13.
+    branches: [main, master]
+    tags: ["v*"]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
