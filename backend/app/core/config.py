@@ -91,6 +91,14 @@ class Settings(BaseSettings):
     # "MockProvider must never run in production" is enforceable from day one.
     ALLOW_MOCK_DATA: bool = True
 
+    # ------------------------------------------------------------ providers
+    # How market data is obtained. `live` fetches from the exchange; `replay`
+    # serves recorded genuine responses through the same parsers (see
+    # providers/replay.py). Chosen explicitly rather than inferred from network
+    # reachability — the origin of a number must not depend on the weather.
+    PROVIDER_MODE: Literal["live", "replay"] = "live"
+    PROVIDER_USER_AGENT_CONTACT: str = ""
+
     # ---------------------------------------------------------------- llm
     # The whole point of ADR-011: the platform must work with the LLM switched
     # off. Nothing in core (market data, quant, db, api, backtest) may depend
@@ -181,6 +189,11 @@ class Settings(BaseSettings):
                 )
             if any(o.startswith("http://") for o in self.CORS_ORIGINS):
                 raise ValueError("CORS_ORIGINS must use https in production.")
+            if self.PROVIDER_MODE != "live":
+                raise ValueError(
+                    "PROVIDER_MODE must be 'live' in production. Recorded responses are "
+                    "genuine but historical; serving them would misrepresent freshness."
+                )
 
         return self
 

@@ -43,19 +43,35 @@ async def test_provenance_schema_has_reproducibility_triple(client):
     assert "data_as_of" in schema["required"]
 
 
-async def test_capabilities_declares_no_market_features_in_phase_1(client):
+async def test_capabilities_declares_only_what_is_built(client):
+    """Phase 2 delivers market data. Everything downstream must still be
+    declared absent — the capability endpoint is the honest answer to
+    'what can this deployment actually do?'."""
     caps = (await client.get("/api/v1/meta/capabilities")).json()["data"]
     features = caps["features"]
-    for f in ("market_data", "quant", "news", "ai_score", "backtest", "portfolio"):
-        assert features[f] is False, f"Phase 1 must not claim feature '{f}'"
+    assert features["market_data"] is True
+    for f in ("quant", "news", "ai_score", "backtest", "portfolio"):
+        assert features[f] is False, f"Phase 2 must not claim feature '{f}'"
 
 
-async def test_no_endpoint_serves_market_data_in_phase_1(client):
-    """Guards against a well-meaning demo endpoint appearing later."""
+async def test_no_endpoint_serves_unbuilt_features(client):
+    """Guards against a well-meaning demo endpoint appearing ahead of its phase."""
     spec = (await client.get("/api/v1/openapi.json")).json()
-    forbidden = ("/stocks", "/quotes", "/ai-score", "/news", "/backtest", "/sectors")
+    forbidden = ("/ai-score", "/news", "/backtest", "/sectors", "/copilot", "/portfolio")
     offenders = [p for p in spec["paths"] if any(p.startswith(f"/api/v1{x}") for x in forbidden)]
-    assert offenders == [], f"Phase 1 must not expose market endpoints: {offenders}"
+    assert offenders == [], f"endpoints exist for unbuilt features: {offenders}"
+
+
+async def test_market_endpoints_are_registered(client):
+    spec = (await client.get("/api/v1/openapi.json")).json()
+    for path in (
+        "/api/v1/market/status",
+        "/api/v1/stocks",
+        "/api/v1/stocks/{symbol}/prices",
+        "/api/v1/indices",
+        "/api/v1/institutional",
+    ):
+        assert path in spec["paths"], path
 
 
 async def test_openapi_is_generated(client):

@@ -12,6 +12,9 @@ os.environ.setdefault("REQUIRE_TIMESCALEDB", "false")
 os.environ.setdefault("LOG_FORMAT", "console")
 os.environ.setdefault("LOG_LEVEL", "WARNING")
 os.environ.setdefault("JWT_SECRET", "test-secret-key-that-is-long-enough-for-tests-0123456789")
+# Tests exercise the production parsers against recorded genuine TWSE responses;
+# see providers/replay.py for why this is not mock data.
+os.environ.setdefault("PROVIDER_MODE", "replay")
 
 import httpx
 from asgi_lifespan import LifespanManager
@@ -125,6 +128,42 @@ async def client(db_schema, redis_available) -> AsyncGenerator[httpx.AsyncClient
         async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
             yield c
     await close_redis()
+
+
+@pytest.fixture
+async def registry(settings, redis_available):
+    """Provider registry in replay mode, sharing the test's rate limiter."""
+    from app.providers.rate_limiter import reset_rate_limiter
+    from app.providers.registry import ProviderRegistry
+
+    reset_rate_limiter()
+    reg = ProviderRegistry(settings)
+    yield reg
+    await reg.aclose()
+    reset_rate_limiter()
+
+
+@pytest.fixture
+async def seeded_sources(session):
+    """Minimal data_sources rows so the registry can build a provider."""
+    from app.models.ops import DataSource, SourceStatus
+
+    session.add(
+        DataSource(
+            code="TWSE",
+            name="TWSE OpenAPI",
+            provider_type="TWSE",
+            base_url="https://openapi.twse.com.tw/v1",
+            market="TWSE",
+            rate_limit_per_minute=60,
+            max_concurrency=2,
+            min_interval_ms=0,
+            timeout_seconds=20,
+            max_retries=3,
+            status=SourceStatus.ACTIVE,
+        )
+    )
+    await session.commit()
 
 
 @pytest.fixture

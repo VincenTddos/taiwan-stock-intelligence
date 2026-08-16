@@ -12,7 +12,7 @@ from app.core.config import get_settings
 from app.db.base import Base
 
 # Importing the model modules is what populates Base.metadata for autogenerate.
-from app.models import platform, user  # noqa: F401
+from app.models import market, ops, platform, user  # noqa: F401
 
 config = context.config
 if config.config_file_name is not None:

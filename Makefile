@@ -121,3 +121,21 @@ check: lint typecheck test migrate-check ## The full Phase gate — everything C
 .PHONY: verify
 verify: ## Probe a running stack and print a health summary
 	@bash scripts/verify_stack.sh
+
+# ---------------------------------------------------------------- ingestion
+.PHONY: seed-sources ingest-calendar ingest-daily ingest-all backfill
+seed-sources: ## Seed the data source registry and freshness contracts
+	cd $(BACKEND) && . .venv/bin/activate && python -m scripts.seed_sources
+
+ingest-calendar: ## Build the trading calendar:  make ingest-calendar YEAR=2026
+	cd $(BACKEND) && . .venv/bin/activate && python -m scripts.ingest calendar --year $(or $(YEAR),2026)
+
+ingest-daily: ## Ingest the latest session (prices, indices, institutional flow)
+	cd $(BACKEND) && . .venv/bin/activate && python -m scripts.ingest daily
+
+ingest-all: ingest-calendar ingest-daily ## Calendar + master + latest session
+	cd $(BACKEND) && . .venv/bin/activate && python -m scripts.ingest master
+
+backfill: ## Resumable backfill:  make backfill DATASET=institutional_flow FROM=2019-01-01 TO=2026-08-15
+	cd $(BACKEND) && . .venv/bin/activate && \
+		python -m scripts.ingest backfill --dataset $(DATASET) --from $(FROM) --to $(TO)

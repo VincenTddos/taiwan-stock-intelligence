@@ -50,9 +50,9 @@ async def capabilities(settings: SettingsDep) -> Envelope[dict[str, Any]]:
         {
             "environment": settings.APP_ENV.value,
             "version": settings.APP_VERSION,
-            "phase": "1 — Foundation",
+            "phase": "2 — Market Data",
             "features": {
-                "market_data": False,
+                "market_data": True,
                 "quant": False,
                 "news": False,
                 "ai_score": False,
@@ -62,9 +62,11 @@ async def capabilities(settings: SettingsDep) -> Envelope[dict[str, Any]]:
             },
             "llm_enabled": settings.ENABLE_LLM,
             "mock_data_allowed": settings.ALLOW_MOCK_DATA,
+            "provider_mode": settings.PROVIDER_MODE,
             "note": (
-                "Phase 1 is infrastructure only. No market data exists in this "
-                "deployment; no endpoint returns prices, scores or news."
+                "Phase 2 serves market data from the database only — no endpoint "
+                "calls an exchange. Quant, news, AI scoring, backtesting and "
+                "portfolio analytics are not implemented yet."
             ),
         },
         source=["SELF"],

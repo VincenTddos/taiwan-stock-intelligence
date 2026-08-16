@@ -89,12 +89,8 @@ async def test_users_role_check_constraint(session):
 
     from app.core.security import hash_password
 
-    await session.execute(
-        text(
-            "ALTER TABLE users ADD CONSTRAINT ck_users_role_allowed "
-            "CHECK (role IN ('admin','analyst','viewer'))"
-        )
-    )
+    # The constraint is declared on the model as of Phase 2, so it already
+    # exists; Phase 1 added it by hand here.
     with pytest.raises(DBAPIError):
         await session.execute(
             text("INSERT INTO users (email,password_hash,role) VALUES (:e,:p,'superuser')"),

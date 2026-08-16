@@ -66,6 +66,7 @@ ignore = [
     "RUF001", # Chinese text legitimately contains full-width punctuation
     "RUF002",
     "RUF003",
+    "N818",   # CalendarNotPopulated / RateLimitExceeded read better unsuffixed
 ]
 
 [tool.ruff.lint.isort]

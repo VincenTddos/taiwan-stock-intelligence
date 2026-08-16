@@ -178,6 +178,56 @@ export interface Capabilities {
   note: string;
 }
 
+export interface DatasetHealth {
+  dataset: string;
+  description: string | null;
+  status: "FRESH" | "STALE" | "MISSING" | "DEGRADED";
+  last_data_date: string | null;
+  last_ingested_at: string | null;
+  expected_next_update: string | null;
+  record_count: number;
+  lag_minutes: number | null;
+  expected_lag_minutes: number;
+  quarantined: number;
+  detail: Record<string, unknown> | null;
+}
+
+export interface SourceHealth {
+  code: string;
+  name: string;
+  status: "ACTIVE" | "DEGRADED" | "UNVERIFIED" | "DISABLED";
+  market: string | null;
+  base_url: string;
+  verified_at: string | null;
+  last_success_at: string | null;
+  last_failure_at: string | null;
+  consecutive_failures: number;
+  last_error: string | null;
+  rate_limit_per_minute: number;
+  notes: string | null;
+}
+
+export interface DataOperations {
+  overall: "FRESH" | "STALE" | "MISSING" | "DEGRADED";
+  datasets: DatasetHealth[];
+  sources: SourceHealth[];
+  quarantine_total: number;
+}
+
+export interface MarketStatus {
+  market: string;
+  last_trading_date: string | null;
+  next_trading_date: string | null;
+  is_trading_day_today: boolean | null;
+  session_type_today: string | null;
+  symbol_count: number | null;
+  price_row_count: number | null;
+  coverage: { from: string | null; to: string | null };
+  freshness: string;
+  is_stale: boolean;
+  updated_at: string;
+}
+
 export interface CurrentUser {
   id: number;
   email: string;
@@ -200,6 +250,8 @@ export const api = {
   healthFull: () => request<HealthReport>("/health/full", { auth: false }),
   healthDatabase: () => request<ComponentHealth[]>("/health/database", { auth: false }),
   capabilities: () => request<Capabilities>("/meta/capabilities", { auth: false }),
+  dataOperations: () => request<DataOperations>("/market/data-operations", { auth: false }),
+  marketStatus: () => request<MarketStatus>("/market/status", { auth: false }),
   workerEcho: (message: string) =>
     request<{ dispatched: boolean; task_id: string; completed: boolean; result?: unknown; error?: string }>(
       `/health/worker/echo?message=${encodeURIComponent(message)}`,

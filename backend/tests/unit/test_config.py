@@ -45,6 +45,7 @@ def _prod(**overrides: object) -> Settings:
         "REQUIRE_TIMESCALEDB": True,
         "REQUIRE_PGVECTOR": True,
         "CORS_ORIGINS": ["https://twquant.example"],
+        "PROVIDER_MODE": "live",
         "_env_file": None,
     }
     base.update(overrides)
@@ -95,6 +96,13 @@ def test_production_requires_extensions():
 def test_valid_production_config_constructs():
     s = _prod()
     assert s.is_production is True
+
+
+def test_production_rejects_replayed_providers():
+    """Recorded responses are genuine but historical. Serving them from
+    production would misrepresent freshness."""
+    with pytest.raises(ValidationError, match="PROVIDER_MODE"):
+        _prod(PROVIDER_MODE="replay")
 
 
 def test_database_url_shape():

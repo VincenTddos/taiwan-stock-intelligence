@@ -61,8 +61,12 @@ async def seed() -> int:
     return 0
 
 
-if __name__ == "__main__":
+async def _main() -> int:
     try:
-        raise SystemExit(asyncio.run(seed()))
+        return await seed()
     finally:
-        asyncio.run(dispose_engine())
+        await dispose_engine()
+
+
+if __name__ == "__main__":
+    raise SystemExit(asyncio.run(_main()))

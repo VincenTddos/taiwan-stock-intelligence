@@ -1,0 +1,10 @@
+[
+{"Date":"1150814","Code":"00400A","Name":"主動國泰動能高息","TradeVolume":"49694719","TradeValue":"738788003","OpeningPrice":"14.87","HighestPrice":"14.94","LowestPrice":"14.74","ClosingPrice":"14.79","Change":"0.0600","Transaction":"8912"},
+{"Date":"1150814","Code":"00401A","Name":"主動摩根台灣鑫收","TradeVolume":"6754801","TradeValue":"92835120","OpeningPrice":"13.80","HighestPrice":"13.82","LowestPrice":"13.65","ClosingPrice":"13.67","Change":"0.0000","Transaction":"1334"},
+{"Date":"1150814","Code":"00402A","Name":"主動安聯美國科技","TradeVolume":"8756905","TradeValue":"87006908","OpeningPrice":"9.95","HighestPrice":"9.98","LowestPrice":"9.91","ClosingPrice":"9.91","Change":"0.0100","Transaction":"1174"},
+{"Date":"1150814","Code":"00403A","Name":"主動統一升級50","TradeVolume":"353553268","TradeValue":"3667998134","OpeningPrice":"10.40","HighestPrice":"10.42","LowestPrice":"10.28","ClosingPrice":"10.32","Change":"0.0200","Transaction":"44107"},
+{"Date":"1150814","Code":"00404A","Name":"主動聯博動能50","TradeVolume":"13904961","TradeValue":"135113301","OpeningPrice":"9.80","HighestPrice":"9.82","LowestPrice":"9.66","ClosingPrice":"9.68","Change":"-0.0600","Transaction":"1051"},
+{"Date":"1150814","Code":"00405A","Name":"主動富邦台灣龍耀","TradeVolume":"94731648","TradeValue":"824567561","OpeningPrice":"8.70","HighestPrice":"8.76","LowestPrice":"8.62","ClosingPrice":"8.66","Change":"0.0400","Transaction":"10705"},
+{"Date":"1150814","Code":"00406A","Name":"主動中信台灣收益","TradeVolume":"49228299","TradeValue":"481755483","OpeningPrice":"9.74","HighestPrice":"9.85","LowestPrice":"9.73","ClosingPrice":"9.78","Change":"0.0900","Transaction":"8744"},
+{"Date":"1150814","Code":"00407A","Name":"主動凱基台灣","TradeVolume":"123267220","TradeValue":"1227273947","OpeningPrice":"9.93","HighestPrice":"10.01","LowestPrice":"9.87","ClosingPrice":"9.92","Change":"0.0900","Transaction":"14258"}
+]

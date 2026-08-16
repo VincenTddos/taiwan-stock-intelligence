@@ -13,6 +13,7 @@ import { api } from "@/lib/api/client";
 const NAV = [
   { href: "/dashboard", label: "Dashboard", enabled: true },
   { href: "/health", label: "System Health", enabled: true },
+  { href: "/data-operations", label: "Data Operations", enabled: true },
   { href: "#", label: "Market", enabled: false },
   { href: "#", label: "Screener", enabled: false },
   { href: "#", label: "Sectors", enabled: false },
@@ -59,7 +60,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           <div className="flex items-baseline gap-2">
             <span className="text-base font-bold tracking-tight">twquant</span>
             <span className="rounded border border-border px-1 py-0.5 text-[9px] font-medium tracking-wider text-fg-muted">
-              P1
+              P2
             </span>
           </div>
         </div>
@@ -71,7 +72,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
               return (
                 <div
                   key={item.label}
-                  title="尚未實作 — 依 Phase 2+ 開放"
+                  title="尚未實作 — 依 Phase 3+ 開放"
                   className="flex cursor-not-allowed items-center justify-between rounded px-3 py-2 text-sm text-fg-subtle/50"
                 >
                   {item.label}
