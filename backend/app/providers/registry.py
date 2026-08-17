@@ -26,6 +26,11 @@ from app.providers.corporate_actions import CorporateActionProvider
 from app.providers.rate_limiter import RateLimitConfig, get_rate_limiter
 from app.providers.replay import ReplayProvider
 from app.providers.twse import TWSEProvider
+from app.providers.twse_corporate_actions import (
+    TWSEForecastProvider,
+    TWSEReductionProvider,
+    TWSEResultsProvider,
+)
 
 log = get_logger(__name__)
 
@@ -36,10 +41,19 @@ IMPLEMENTED_PROVIDER_TYPES = frozenset({"TWSE"})
 
 # Corporate actions are resolved separately from prices. The source that
 # publishes a dividend is not necessarily the source that publishes the close,
-# and binding them together would make that one decision permanent. Empty until
-# Phase 3 lands the first implementation; a lookup against it fails loudly
-# rather than falling back to a price provider that cannot answer.
-CORPORATE_ACTION_PROVIDER_TYPES: dict[str, type[CorporateActionProvider]] = {}
+# and binding them together would make that one decision permanent.
+#
+# Three TWSE entries, not one, because no single endpoint can drive an
+# adjustment: the forecast table decomposes an event but only ahead of time, the
+# results table has history and the exchange's own reference prices but reports
+# a combined figure it cannot split, and capital reductions are elsewhere again.
+# Each declares `supported_actions` as narrowly as its data justifies, and
+# coverage unions across them.
+CORPORATE_ACTION_PROVIDER_TYPES: dict[str, type[CorporateActionProvider]] = {
+    "TWSE_EXRIGHT_FORECAST": TWSEForecastProvider,
+    "TWSE_EXRIGHT_RESULTS": TWSEResultsProvider,
+    "TWSE_CAPITAL_REDUCTION": TWSEReductionProvider,
+}
 
 
 class ProviderMode(StrEnum):

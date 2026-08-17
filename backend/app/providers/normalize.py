@@ -33,6 +33,9 @@ _ROC_COMPACT = re.compile(r"^(\d{3})(\d{2})(\d{2})$")
 _ROC_SLASHED = re.compile(r"^(\d{2,3})/(\d{1,2})/(\d{1,2})$")
 _AD_COMPACT = re.compile(r"^(\d{4})(\d{2})(\d{2})$")
 _AD_DASHED = re.compile(r"^(\d{4})-(\d{1,2})-(\d{1,2})$")
+# `115年01月06日`. A fourth ROC spelling, used by the ex-rights tables. Four
+# formats from one exchange is not a design; it is what is there.
+_ROC_CJK = re.compile(r"^(\d{2,3})年(\d{1,2})月(\d{1,2})日$")
 
 ROC_OFFSET = 1911
 
@@ -64,15 +67,26 @@ def clean(value: object) -> str | None:
 def parse_roc_date(value: object, *, field: str = "date") -> date:
     """Parse a Taiwanese ROC-calendar date.
 
-    Accepts `1150731`, `115/07/01`, and — because some endpoints mix calendars —
-    Gregorian `20260731` and `2026-07-31`.
+    Accepts every form TWSE has been observed to emit:
+
+    * `1150731`      compact ROC — t187ap45_L, TWT48U_ALL
+    * `115/07/01`    slashed ROC — STOCK_DAY, TWTAUU
+    * `115年01月06日`  CJK ROC     — TWT49U
+    * `20260731`     compact Gregorian — t187ap03_L listing dates
+    * `2026-07-31`   ISO
+
+    Five spellings across one exchange's endpoints, all of them real.
     """
     text = clean(value)
     if text is None:
         raise ParseError(field, value, "empty date")
     text = text.replace(" ", "")
 
-    if (m := _ROC_COMPACT.match(text)) or (m := _ROC_SLASHED.match(text)):
+    if (
+        (m := _ROC_COMPACT.match(text))
+        or (m := _ROC_SLASHED.match(text))
+        or (m := _ROC_CJK.match(text))
+    ):
         y, mo, d = int(m[1]) + ROC_OFFSET, int(m[2]), int(m[3])
     elif (m := _AD_COMPACT.match(text)) or (m := _AD_DASHED.match(text)):
         y, mo, d = int(m[1]), int(m[2]), int(m[3])
