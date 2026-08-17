@@ -168,12 +168,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # No `version:` input. The version now comes from the `packageManager`
-      # field in web/package.json, which corepack and this action both read —
-      # so CI, the Docker build and a developer's laptop all resolve the same
-      # pnpm. Specifying it in both places makes the action fail with
-      # "Multiple versions of pnpm specified".
+      # No `version:` input. The version comes from the `packageManager` field,
+      # which corepack and this action both read — so CI, the Docker build and
+      # a developer's laptop all resolve the same pnpm. Specifying it in both
+      # places makes the action fail with "Multiple versions of pnpm specified".
+      #
+      # `package_json_file` is required because the frontend is not at the
+      # repository root. The action looks for ./package.json by default, finds
+      # nothing, and fails with "No pnpm version is specified" — which is what
+      # it did on the second CI run.
       - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: web/package.json
 
       - uses: actions/setup-node@v4
         with:
