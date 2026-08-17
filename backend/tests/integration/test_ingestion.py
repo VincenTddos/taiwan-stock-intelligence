@@ -694,3 +694,89 @@ class TestCorporateActionCoverage:
         with pytest.raises(IntegrityError):
             await session.commit()
         await session.rollback()
+
+
+# ================================================== bulk write at real scale
+INVESTOR_TYPES = (
+    "FOREIGN",
+    "FOREIGN_DEALER",
+    "INVESTMENT_TRUST",
+    "DEALER_SELF",
+    "DEALER_HEDGE",
+    "DEALER",
+    "TOTAL",
+)
+
+
+class TestUpsertAtMarketScale:
+    """A full session is thousands of rows. The fixtures are dozens.
+
+    PostgreSQL's wire protocol allows 32767 bind parameters per statement and a
+    multi-row INSERT spends one per column per row, so a single statement caps
+    out around three thousand institutional flow rows. A real session is roughly
+    1,400 symbols x 7 investor types. Every test before this one used recorded
+    samples small enough that the ceiling was invisible.
+    """
+
+    async def test_a_full_market_session_writes_without_hitting_the_bind_limit(
+        self, session, calendar_ready
+    ):
+        rows = [
+            {
+                "symbol": f"{1000 + n // 7:04d}",
+                "market": "TWSE",
+                "trading_date": SNAPSHOT_DATE,
+                "investor_type": INVESTOR_TYPES[n % 7],
+                "buy_volume": n * 10,
+                "sell_volume": n * 5,
+                "net_volume": n * 5,
+                "source": "TEST",
+            }
+            for n in range(9800)
+        ]
+        written = await IngestionPipeline(session).upsert("institutional_flow", rows)
+        await session.commit()
+
+        assert written == len(rows)
+        stored = (
+            await session.execute(
+                select(func.count())
+                .select_from(InstitutionalFlow)
+                .where(InstitutionalFlow.source == "TEST")
+            )
+        ).scalar_one()
+        assert stored == len(rows)
+
+    async def test_chunking_does_not_break_idempotency(self, session, calendar_ready):
+        """Chunking splits one statement into several. Each still has to resolve
+        conflicts against rows an earlier chunk just wrote."""
+        rows = [
+            {
+                "symbol": f"{2000 + n // 7:04d}",
+                "market": "TWSE",
+                "trading_date": SNAPSHOT_DATE,
+                "investor_type": INVESTOR_TYPES[n % 7],
+                "buy_volume": n,
+                "sell_volume": 0,
+                "net_volume": n,
+                "source": "TEST2",
+            }
+            for n in range(7000)
+        ]
+        pipeline = IngestionPipeline(session)
+        await pipeline.upsert("institutional_flow", rows)
+        await session.commit()
+
+        for r in rows:
+            r["buy_volume"] = r["buy_volume"] + 1
+        await pipeline.upsert("institutional_flow", rows)
+        await session.commit()
+
+        stored = (
+            await session.execute(
+                select(func.count())
+                .select_from(InstitutionalFlow)
+                .where(InstitutionalFlow.source == "TEST2")
+            )
+        ).scalar_one()
+        assert stored == len(rows), "re-running must update in place, not duplicate"

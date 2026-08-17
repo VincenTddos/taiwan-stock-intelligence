@@ -10,14 +10,18 @@
 Market Data Infrastructure 已完整建置並跑通：provider 抽象、registry、交易日曆、
 canonical model、驗證、quarantine、provenance、freshness、availability、
 rate limiter、可續跑 backfill、market API、Redis 快取，
-**全部用真實 TWSE 回應端到端驗證過**。217 個測試通過、覆蓋率 85%、
-`ruff` 與 `mypy --strict` 零告警、migration 可逆且無 drift。
+**解析層面全部用真實 TWSE 回應驗證過，並於 2026-08-17 完成一次
+`PROVIDER_MODE=live` 的全市場實測**（1,378 檔日線、1,095 家公司、267 種指數，
+見 §3）。251 個測試通過、`ruff` 與 `mypy --strict` 零告警、migration 可逆且無 drift。
 
-**一個環境限制**：這個雲端容器的對外連線被允許清單阻擋，
-`curl` 到 `openapi.twse.com.tw` / `www.twse.com.tw` / `www.tpex.org.tw` 全部回 `http=000`。
-因此 **live HTTP 抓取無法在此環境執行**。所有 provider 程式碼已完成，
-並以**逐字錄製的真實 TWSE 回應**驗證整條管線（見 §2）。
-批次歷史回補需在有網路的機器執行 —— 指令見 §11。
+那次 live 實測抓到一個 fixture 在結構上不可能抓到的缺陷（§13 第 8 項），
+也因此 §3 與 §7 的數字現在是實測值而非樣本值。
+
+**一個環境限制**：開發用的雲端容器對外連線被允許清單阻擋，
+`curl` 到 `openapi.twse.com.tw` / `www.twse.com.tw` / `www.tpex.org.tw` 全部回 `http=000`，
+所以那裡的驗證一律走**逐字錄製的真實 TWSE 回應**（見 §2）。
+§3 與 §7 的數字則是在**有網路的機器上**以 `PROVIDER_MODE=live` 實際跑出來的。
+歷史回補尚未執行 —— 指令見 §11。
 
 ---
 
@@ -90,21 +94,31 @@ provenance 永遠不會宣稱一個沒發生過的 HTTP 請求。
 
 ## 3. Data coverage
 
-**這是本環境實際落地的資料，不是預估。**
+**2026-08-17 於有網路的機器上實測（`PROVIDER_MODE=live`，Docker stack）。**
+以下每個數字都來自 `scripts/data_ops_report.py` 的輸出，不是估算。
 
-| 資料集 | 筆數 | 涵蓋範圍 |
-|--------|------|---------|
-| `trading_calendar` | 365 | 2026 全年（243 交易日 / 98 週末 / 24 休市） |
-| `daily_prices` | 30 | 2330 於 2026-07（22 筆）+ 8 檔 ETF 於 2026-08-14 |
-| `index_quotes` | 12 | 2026-08-14 各類指數 |
-| `institutional_flow` | 28 | 2026-08-14，4 檔 × 7 種投資人類別 |
-| `stock_master` | 3 | 1101 / 1102 / 1103（SCD2 current） |
-| `raw_ingestions` | 6 | 每筆 canonical row 都指向其中之一 |
-| `data_quarantine` | 0 | 真實資料無一筆被拒 |
-| `data_sources` | 5 | 2 ACTIVE / 3 UNVERIFIED |
+| 資料集 | provider 回傳 | 實際寫入 | quarantine | suspect | 涵蓋 |
+|--------|-------------|---------|-----------|---------|------|
+| `trading_calendar` | 24 筆公告 | 365 天 | 0 | 0 | 2026 全年，243 交易日 |
+| `stock_master` | 1,095 | 1,095 | 0 | 0 | 全上市公司（SCD2 current） |
+| `daily_prices` | 1,378 | 1,378 | 0 | **3** | 2026-08-14，**1,378 檔** |
+| `index_quotes` | 267 | 267 | 0 | 0 | 2026-08-14，**267 種指數** |
+| `institutional_flow` | — | **失敗** | — | — | 見 §13 第 8 項 |
 
-**這不是市場快照。** fixture 是**截斷樣本**（`stock_day_all` 8 筆、`t187ap03_L` 3 筆），
-足以驗證管線，不足以代表市場。上表每個數字都標了實際筆數，不做任何全覆蓋暗示。
+`raw_ingestions` 4 筆，**transport 全部是 `LIVE`** —— 這是這份報告與先前
+replay 版本的關鍵差別，每一筆數字都對應一次真實的 HTTP 請求。
+
+**與錄製樣本的落差說明了為什麼要做這次實測。** 樣本裡 `index_quotes` 是 12 筆，
+真實是 **267** 筆；`daily_prices` 樣本 8 檔，真實 **1,378** 檔。
+樣本足以驗證解析正確，**完全不足以暴露規模問題** —— 而規模問題確實存在（§13 第 8 項）。
+
+`daily_prices` 有 **3 筆被標記為 SUSPECT**：依設計它們**入庫並標記**，不是被丟掉。
+真實資料第一次跑就出現 suspect，正是 `P30`/`P31` 這類規則存在的理由。
+
+**Freshness 實測**：`daily_prices` 與 `index_quotes` 回報 **STALE**，
+`last_data=2026-08-14`，而執行日是 08-17（週一）。這是正確行為 ——
+freshness 是以交易日曆為基準，不是牆上時鐘：08-15/16 是週末，
+所以週一執行時最後一筆資料是上週五的，且當日盤後資料尚未發布。
 
 ### 3.1 交易日曆的一個真實不一致
 
@@ -191,22 +205,26 @@ anomaly 是「是否合理」，沒有上下文判不出來。只有前者可以
 
 ## 7. Ingestion benchmarks
 
-實測於 2 vCPU / 8 GB 沙箱，資料來自 `ingestion_metrics` 表：
+**2026-08-17 實測，`PROVIDER_MODE=live`，Docker stack。含網路時間。**
 
 | 資料集 | 筆數 | 總耗時 |
 |--------|------|--------|
-| `index_quotes` | 12 | 9 ms |
-| `daily_prices`（快照） | 8 | 7 ms |
-| `daily_prices`（2330 一個月） | 22 | 23 ms |
-| `institutional_flow` | 28 | 10 ms |
+| `trading_calendar` | 365 天（24 筆公告展開） | 78 ms |
+| `index_quotes` | 267 | 55 ms |
+| `stock_master` | 1,095 | 612 ms |
+| `daily_prices` | 1,378 | 617 ms |
+| `institutional_flow` | — | 14,666 ms 後失敗 |
 
-**這些數字沒有網路時間**（replay transport），所以只代表 parse + validate + persist。
-真實 ingestion 會由 provider 延遲主導。`ingestion_metrics` 分開記錄
-`provider_ms / parse_ms / validation_ms / persist_ms`，
-所以有網路後可以直接看出瓶頸在哪 —— 這正是「先量測再最佳化」的準備工作。
+全市場單日 ingestion **不到 1.5 秒**（不含失敗的那項）。
+這遠低於任何需要最佳化的門檻，所以依 ARCHITECTURE §16 **維持不做最佳化**：
+沒有 COPY、沒有 partitioning、沒有 materialized view。先量測，再決定 —— 量測完了，
+結論是不需要。
 
-**目前沒有做任何最佳化**：沒有 COPY、沒有 partitioning、沒有 materialized view。
-依 ARCHITECTURE §16，等有真實 benchmark 再決定。
+`institutional_flow` 那 14.7 秒幾乎全花在建構一個註定被資料庫拒絕的巨大 statement 上，
+不是網路。修法見 §13 第 8 項。
+
+**這組數字取代了先前的 replay 版本**（8 檔 7 ms 之類）。舊數字沒有網路時間也沒有真實
+規模，兩者都是這次才補上的。
 
 ---
 
@@ -346,7 +364,7 @@ cd backend && .venv/bin/python -m scripts.data_ops_report --year 2026 --json rep
 
 ## 13. 這一階段被測試抓到的缺陷
 
-七個，都在寫完之後、push 之前被抓到：
+八個。前七個在 push 之前，第八個要等真實市場資料才會出現：
 
 | # | 缺陷 | 為什麼危險 |
 |---|------|-----------|
@@ -357,6 +375,7 @@ cd backend && .venv/bin/python -m scripts.data_ops_report --year 2026 --json rep
 | 5 | **多列 upsert 對異質 key 崩潰** | 三大法人的 DEALER/TOTAL 只有 net，其餘有 buy/sell。SQLAlchemy 從第一列推導欄位，缺欄位的列直接編譯失敗 |
 | 6 | **`.gitignore` 吞掉整個 models 套件**（Phase 1 遺留） | `models/` 沒有前導斜線，會在**任何深度**比對，於是 `backend/app/models/` 從 Phase 1 起就不在版控裡。`git status` 全綠、本機測試全過，但 clean clone 根本 import 不起來 |
 | 7 | **provenance 只是慣例，不是約束** | 七張表的 `ingestion_id` 是裸 BigInteger，沒有 FK。「每個數字都能追回原始 bytes」全靠每個寫入者自己記得 —— 指向不存在的 ingestion，資料庫照收 |
+| 8 | **全市場寫入超過 PostgreSQL 的參數上限** | 一次 multi-row INSERT 每列每欄用掉一個 bind parameter，上限 32767。三大法人一天約 1,400 檔 × 7 種投資人 × 10 欄 ≈ 98,000 —— **整天的資料一筆都沒進去** |
 
 第 6 項不是這個 Phase 寫壞的，是 commit 前逐項檢查 `git ls-files` 時，發現
 `v0.1.0-phase1` 這個 tag 裡**一個 ORM model 都沒有**。
@@ -568,6 +587,29 @@ api 的健康檢查是同一個病的另一面：它接受任何 `< 500` 的狀�
 結束碼，「build 很慢」和「容器不健康」讀起來一模一樣。失敗時現在會先印出
 每個容器的 state、health status 和最後一次 healthcheck 的輸出，
 不健康的是哪一個服務會被直接寫出來，不用從 200 行 log tail 裡猜。
+
+### 第 8 項：只有真實資料才會出現的缺陷
+
+前七項都能在錄製的 fixture 上被抓到。**第八項不行，而且這正是它的意義。**
+
+一次 multi-row INSERT 每列每欄用掉一個 bind parameter，PostgreSQL 的線路協定
+上限是 32767。所有 fixture 都是幾十列，最多花掉幾百個參數。真實的一天：
+三大法人約 1,400 檔 × 7 種投資人 = 9,800 列，乘上 10 欄接近 98,000 個參數。
+
+結果不是變慢，是 **`the number of query arguments cannot exceed 32767`，整天的
+三大法人資料一筆都沒寫進去**。
+
+修法是依 statement 實際編譯出來的參數數量分批。這裡我第一次修錯了：我用
+payload 的 key 數量去算每列寬度，但 **SQLAlchemy 還會綁定 payload 根本沒提到的
+欄位** —— 任何帶 Python-side default 的欄位，例如 `quality_status`。所以實際寬度
+比我算的多，第一版修完還是爆掉。改成編譯一列真的數出來，才是對的。
+
+新增的測試直接寫 9,800 列，也就是真實市場的規模。它在修好之前會紅。
+
+**這件事改變了我對「fixture 驗證過」這句話的說法。** 錄製樣本證明的是
+**解析正確**；它在結構上證明不了**規模可行**。Phase 2 報告先前寫「全部用真實
+TWSE 回應端到端驗證過」，那句話在解析層面是真的，在規模層面不是。這是這次
+live 實測最有價值的產出 —— 比那些覆蓋率數字有價值得多。
 
 ### 這一段的結論
 

@@ -28,6 +28,7 @@ from dataclasses import dataclass, field
 from datetime import date
 from typing import Any
 
+from sqlalchemy.dialects import postgresql
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -45,6 +46,12 @@ from app.services.calendar_service import TradingCalendarService
 from app.services.quality_service import DataQualityService, ValidationResult
 
 log = get_logger(__name__)
+
+
+# PostgreSQL refuses a statement with more than 32767 bind parameters. Held a
+# little under so a column added later does not silently push a previously fine
+# dataset over the edge.
+PARAM_LIMIT = 30000
 
 
 @dataclass(slots=True)
@@ -404,12 +411,34 @@ class IngestionPipeline:
         present = {k for row in deduped.values() for k in row}
         values = [{k: row.get(k) for k in present} for row in deduped.values()]
 
-        stmt = pg_insert(model).values(values)
-        stmt = stmt.on_conflict_do_update(
-            index_elements=key_cols,
-            set_={c: getattr(stmt.excluded, c) for c in update_cols if c in present},
-        )
-        await self.session.execute(stmt)
+        # PostgreSQL's wire protocol allows at most 32767 bind parameters per
+        # statement, and a multi-row INSERT spends one per column per row. A
+        # full session of institutional flow is roughly 1,400 symbols x 7
+        # investor types x 10 columns — near 100,000 — so the whole day failed
+        # with "the number of query arguments cannot exceed 32767" and nothing
+        # was written.
+        #
+        # This could not show up before today: every earlier run used recorded
+        # fixtures of a few dozen rows. It took the first live full-market
+        # ingestion to reach the limit, which is precisely the class of defect
+        # that sample data cannot surface.
+        # Measured from a compiled single-row statement rather than counted from
+        # the dict keys. SQLAlchemy also binds columns the payload never
+        # mentions — anything carrying a Python-side default, such as
+        # `quality_status` — so counting keys understates the real width and the
+        # first attempt at this fix still overflowed. Compiling is exact, and it
+        # stays correct when a column is added later.
+        probe = pg_insert(model).values([values[0]])
+        per_row = len(probe.compile(dialect=postgresql.dialect()).params)  # type: ignore[no-untyped-call]
+        chunk = max(1, PARAM_LIMIT // max(1, per_row))
+        for start in range(0, len(values), chunk):
+            batch = values[start : start + chunk]
+            stmt = pg_insert(model).values(batch)
+            stmt = stmt.on_conflict_do_update(
+                index_elements=key_cols,
+                set_={c: getattr(stmt.excluded, c) for c in update_cols if c in present},
+            )
+            await self.session.execute(stmt)
         return len(deduped)
 
     async def _finish(
