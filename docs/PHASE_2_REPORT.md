@@ -507,6 +507,47 @@ Docker build、`pnpm/action-setup` 三者都讀它，一處釘死三處一致。
 順帶一提，inline 的 `# gitleaks:allow` 註解在這裡沒用 ——
 掃描涵蓋每一個 commit，那些值留在 Phase 1 的 blob 裡，改現在的檔案沒有意義。
 
+### 第二、三次執行
+
+| 執行 | 結果 |
+|------|------|
+| #1 | Backend / Frontend / Secret scan / Docker 四個全紅 |
+| #2 | Secret scan ✅、Docker ✅（真的建出兩個映像檔）、Frontend ✗、Backend ✗ |
+| #3 | 待確認 |
+
+**Frontend #2**：`pnpm/action-setup` 讀的是 repo 根目錄的 `package.json`，
+而前端在 `web/` 底下 —— 上一輪加的 `packageManager` 欄位放在它從來不會去看的地方。
+補上 `package_json_file: web/package.json`。
+
+**Backend #2**：`mypy --strict` 21 個錯誤，全是
+`Missing type arguments for generic type "Redis"` 和
+`"Redis[Any]" has no attribute "aclose"`。本地是乾淨的。**差異不在程式碼。**
+
+dev extras 裡宣告了 `types-redis`。redis 從 5.0 起就內建 `py.typed`，
+而 **mypy 優先採用 stub 套件而不是函式庫自己的內建型別** ——
+於是這組 stub 把 redis 8 的真實 API 換成了 4.6 時代的：`aclose()` 消失、
+`Redis` 變成泛型。那 21 個錯誤描述的是一個這個專案根本沒在用的函式庫。
+
+本地之所以過，是因為這顆 venv 建立時 pyproject 還沒有那一行，
+所以從來沒裝過那組 stub。也就是說「mypy --strict 零告警」這句話，
+是對著一個**任何人重新安裝都不會得到的相依集合**量出來的 —— 包括 CI，
+也包括任何一個新的協作者。
+
+拿掉 stub 套件就好了。驗證方式：在暫存目錄依 `pyproject.toml` 重建 venv，
+先重現全部 21 個錯誤，再確認修改後消失。
+
+### 這件事對 gate 的意義（比修法重要）
+
+`clone-check` 原本從 git clone，但 **venv 是 symlink 過去的** ——
+所以它抓得到「檔案沒進版控」，抓不到「環境漂移」。現在它連環境也從
+`pyproject.toml` 重建，並在裡面跑 ruff 和 mypy。這正是 CI 在做的事，
+也正是這裡原本沒有任何一道檢查在做的事。
+
+寫這段的時候又在同一個 target 裡發現第二個缺陷：`mypy app | tail -1`
+把 mypy 的結束碼送進了 pipe，所以第一版印出「Found 21 errors」之後，
+**照樣回報 phase gate passed**。一個不可能失敗的檢查比沒有檢查更糟，
+因為它會被計入。已加上防護：mypy 非零就 dump log 並中斷。
+
 ### 這一段的結論
 
 本地 gate 現在有五道（lint、typecheck、test、migration、clean-clone），
