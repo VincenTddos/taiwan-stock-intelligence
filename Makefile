@@ -112,15 +112,25 @@ openapi: ## Export the OpenAPI schema and regenerate frontend types
 
 # ---------------------------------------------------------------- gate
 .PHONY: clone-check
-clone-check: ## Verify a clean clone actually imports (catches .gitignore holes)
-	@# Every other check runs against the working tree, so a file that exists on
-	@# disk but was never committed passes all of them. A stray `models/` pattern
-	@# hid the entire ORM package for a whole phase exactly this way.
+clone-check: ## Clone fresh, install fresh, typecheck — what CI actually does
+	@# Every other target runs against this working tree and this venv, so it
+	@# can only answer "is the code I have correct". It cannot answer "is the
+	@# repository complete" or "does it still hold with the dependencies
+	@# pyproject.toml actually resolves to". Both have been wrong before:
+	@#   - an unanchored `models/` in .gitignore hid the entire ORM package
+	@#   - a stale venv missing types-redis made mypy pass locally and fail in
+	@#     CI with 21 errors, because the stubs shadow redis's own types
+	@# So this clones from git AND builds the environment from scratch. It is
+	@# the slowest check here and the only one that has caught either bug.
 	@rm -rf /tmp/twquant-clonecheck
 	@git clone -q . /tmp/twquant-clonecheck
-	@ln -s "$(PWD)/$(BACKEND)/.venv" /tmp/twquant-clonecheck/backend/.venv
 	@cp $(BACKEND)/.env /tmp/twquant-clonecheck/backend/.env 2>/dev/null || true
-	@cd /tmp/twquant-clonecheck/backend && . .venv/bin/activate && \
+	@cd /tmp/twquant-clonecheck/backend && \
+		uv venv .venv >/dev/null 2>&1 && . .venv/bin/activate && \
+		uv pip install -q -e ".[dev]" asgi-lifespan && \
+		ruff check . >/dev/null && ruff format --check . >/dev/null && \
+		{ mypy app > mypy.log 2>&1 || { cat mypy.log; false; }; } && \
+		tail -1 mypy.log | sed 's/^/  /' && \
 		PYTHONPATH=/tmp/twquant-clonecheck/backend python -c \
 		"from app.main import create_app; from app.db.base import Base; \
 		 import app.models.market, app.models.ops, app.models.user, app.models.platform; \

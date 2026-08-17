@@ -31,7 +31,12 @@ dev = [
     "pytest-cov>=6.0.0",
     "ruff>=0.8.0",
     "mypy>=1.13.0",
-    "types-redis>=4.6.0",
+    # No types-redis. redis ships py.typed and has since 5.0, and mypy prefers
+    # a stub package over a library's own inline types — so installing the
+    # stubs replaces redis 8's real API surface with a 4.6-era one. `aclose()`
+    # vanishes, `Redis` becomes generic, and mypy --strict produces 21 errors
+    # describing a library nobody is using. It typechecked here only because
+    # this venv predated the line and never had the stubs installed.
 ]
 
 [build-system]
