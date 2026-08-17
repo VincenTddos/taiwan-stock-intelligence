@@ -105,7 +105,17 @@ services:
       migrate:
         condition: service_completed_successfully
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/api/v1/health/redis').status < 500 else 1)"]
+      # `== 200`, not `< 500`. The looser form treated a 404 as healthy, so a
+      # typo in this very path — or the route moving — would have produced a
+      # container that reported itself fine while serving nothing.
+      test:
+        - CMD
+        - python
+        - -c
+        - |
+          import sys, urllib.request
+          r = urllib.request.urlopen("http://localhost:8000/api/v1/health/redis")
+          sys.exit(0 if r.status == 200 else 1)
       interval: 15s
       timeout: 10s
       retries: 5
@@ -137,7 +147,16 @@ services:
       migrate:
         condition: service_completed_successfully
     healthcheck:
-      test: ["CMD", "celery", "-A", "app.workers.celery_app", "inspect", "ping", "-d", "celery@$$HOSTNAME"]
+      # CMD-SHELL, not CMD. `CMD` is the exec form: Docker runs the argv
+      # directly with no shell, so `$HOSTNAME` is never expanded and celery is
+      # asked to ping a node literally named `celery@$HOSTNAME`. That check can
+      # never pass, the worker never becomes healthy, and `compose up --wait`
+      # fails ~2 minutes in — which is exactly what it did the first time this
+      # job ran. The `$$` is compose's own escape, so compose emits `$HOSTNAME`
+      # and the shell is what expands it.
+      test:
+        - CMD-SHELL
+        - celery -A app.workers.celery_app inspect ping -d celery@$$HOSTNAME
       interval: 30s
       timeout: 15s
       retries: 3

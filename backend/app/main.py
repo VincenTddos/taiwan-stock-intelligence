@@ -39,10 +39,16 @@ def create_app() -> FastAPI:
         title="twquant API",
         description=(
             "AI Taiwan Stock Intelligence Platform.\n\n"
-            "**Phase 1 — Foundation.** No market data, scores or news are served "
-            "by this deployment. Every response carries a `meta` block with data "
-            "provenance; model-derived values additionally carry version and "
-            "confidence fields."
+            "**Phase 2 — Market Data Infrastructure.** Serves the trading "
+            "calendar, security master, daily prices, index quotes and "
+            "institutional flow. No scores, predictions, backtests or news: "
+            "those arrive in later phases and no endpoint here pretends "
+            "otherwise.\n\n"
+            "Every response carries a `meta` block with data provenance — "
+            "source, trading date, freshness and whether the value came from "
+            "cache. Model-derived values will additionally carry version and "
+            "confidence fields. Data that does not exist is reported as "
+            "absent, never as zero."
         ),
         version=settings.APP_VERSION,
         openapi_url=f"{settings.API_V1_PREFIX}/openapi.json",
