@@ -574,3 +574,123 @@ class TestDataAvailability:
         assert "9999" in with_delisted
         assert "9999" not in without
         assert "1101" in with_delisted and "1101" in without
+
+
+# ============================================ corporate action coverage
+class TestCorporateActionCoverage:
+    """The five classes Phase 3's adjustment pipeline must handle.
+
+    Requirement 3 of the Phase 3 brief is that the schema *retains the ability*
+    to represent these. That is a claim about storage, so it is tested by
+    storing one of each and reading back the fields that make it adjustable —
+    not by inspecting the enum, which would only prove the names exist.
+    """
+
+    async def test_every_action_class_round_trips(self, session):
+        today = date(2026, 6, 1)
+        announced = datetime(2026, 5, 1, tzinfo=UTC)
+        actions = [
+            CorporateAction(
+                symbol="1101",
+                market="TWSE",
+                action_type="CASH_DIVIDEND",
+                ex_date=today,
+                announced_at=announced,
+                source="TEST",
+                cash_dividend=Decimal("2.5"),
+                factor=Decimal("0.99"),
+                reference_price_before=Decimal("50.0"),
+                reference_price_after=Decimal("47.5"),
+            ),
+            CorporateAction(
+                symbol="1102",
+                market="TWSE",
+                action_type="STOCK_DIVIDEND",
+                ex_date=today,
+                announced_at=announced,
+                source="TEST",
+                stock_dividend=Decimal("0.05"),
+                factor=Decimal("0.952381"),
+            ),
+            CorporateAction(
+                symbol="1103",
+                market="TWSE",
+                action_type="RIGHTS_ISSUE",
+                ex_date=today,
+                announced_at=announced,
+                source="TEST",
+                subscription_price=Decimal("30.0"),
+                subscription_ratio=Decimal("0.1"),
+                factor=Decimal("0.97"),
+            ),
+            CorporateAction(
+                symbol="2330",
+                market="TWSE",
+                action_type="SPLIT",
+                ex_date=today,
+                announced_at=announced,
+                source="TEST",
+                split_ratio=Decimal("2.0"),
+                factor=Decimal("0.5"),
+            ),
+            CorporateAction(
+                # 現金減資: returns cash AND cancels shares. Both fields carry.
+                symbol="2603",
+                market="TWSE",
+                action_type="CAPITAL_REDUCTION",
+                ex_date=today,
+                announced_at=announced,
+                source="TEST",
+                split_ratio=Decimal("0.8"),
+                cash_returned_per_share=Decimal("2.0"),
+                factor=Decimal("1.2"),
+            ),
+        ]
+        session.add_all(actions)
+        await session.commit()
+
+        stored = {
+            a.action_type: a
+            for a in (
+                await session.execute(
+                    select(CorporateAction).where(CorporateAction.source == "TEST")
+                )
+            ).scalars()
+        }
+        assert set(stored) == {
+            "CASH_DIVIDEND",
+            "STOCK_DIVIDEND",
+            "RIGHTS_ISSUE",
+            "SPLIT",
+            "CAPITAL_REDUCTION",
+        }
+        assert stored["CASH_DIVIDEND"].cash_dividend == Decimal("2.5")
+        assert stored["STOCK_DIVIDEND"].stock_dividend == Decimal("0.05")
+        assert stored["RIGHTS_ISSUE"].subscription_price == Decimal("30.0")
+        assert stored["SPLIT"].split_ratio == Decimal("2.0")
+
+        reduction = stored["CAPITAL_REDUCTION"]
+        assert reduction.cash_returned_per_share == Decimal("2.0")
+        assert reduction.split_ratio == Decimal("0.8")
+        assert reduction.cash_dividend is None, (
+            "a capital reduction returns capital, not earnings — storing it as a "
+            "dividend would make the two indistinguishable afterwards"
+        )
+
+    async def test_reference_prices_must_be_positive(self, session):
+        session.add(
+            CorporateAction(
+                symbol="1101",
+                market="TWSE",
+                action_type="CASH_DIVIDEND",
+                ex_date=date(2026, 6, 2),
+                announced_at=datetime(2026, 5, 1, tzinfo=UTC),
+                source="TEST",
+                cash_dividend=Decimal("1"),
+                factor=Decimal("1"),
+                reference_price_before=Decimal("0"),
+            )
+        )
+        with pytest.raises(IntegrityError):
+            await session.commit()
+        await session.rollback()

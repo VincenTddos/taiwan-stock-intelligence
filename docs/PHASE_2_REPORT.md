@@ -287,44 +287,42 @@ migration `0004_enforce_provenance_fk` 不新增表，把七張表的 `ingestion
 
 ## 11. 在有網路的機器上執行（解除 L1/L3/L4）
 
+原本這一節是一串指令，輸出要自己拼。現在是**一支程式**：
+`scripts/data_ops_report.py` 跑完整個序列，一次印出 provider 回傳筆數、
+實際落地筆數、coverage、以及每一項失敗與缺漏。
+
 ```bash
-# 1. 起服務並套用 migration
+# 1. 起服務、套 migration、建立來源登錄
 make up
 make migrate
-make seed
-python -m scripts.seed_sources
+make seed-sources
 
-# 2. 確認 live 抓取可行（PROVIDER_MODE 預設就是 live）
-cd backend && .venv/bin/python - <<'PY'
-import asyncio
-from app.providers.twse import TWSEProvider
-async def main():
-    p = TWSEProvider()
-    print(await p.health())
-    r = await p.get_market_index()
-    print("index records:", r.record_count, "as_of:", r.metadata.data_as_of)
-    await p.aclose()
-asyncio.run(main())
-PY
+# 2. 完整實測（PROVIDER_MODE 預設 live）
+cd backend && .venv/bin/python -m scripts.data_ops_report --year 2026 --json report.json
 
-# 3. 建立交易日曆（必須先做 — 沒有日曆，ingestion 會把資料丟進 quarantine）
-make ingest-calendar YEAR=2026
-
-# 4. 每日資料
-make ingest-daily
-
-# 5. 歷史回補（可中斷，重跑會從 checkpoint 續跑）
+# 3. 歷史回補（可中斷，重跑從 checkpoint 續跑），跑完再測一次
 make backfill DATASET=institutional_flow FROM=2019-01-01 TO=2026-08-15
-
-# 6. 驗證
-make verify
-curl -s localhost:8000/api/v1/market/data-operations | jq '.data.overall, .data.datasets'
+cd backend && .venv/bin/python -m scripts.data_ops_report --year 2026 --json report-after-backfill.json
 ```
 
-**回補中斷後直接重跑同一條指令即可** —— `backfill_checkpoints` 會從游標繼續，
-不會從 2019 重來。
+報告分四段：**Sources**（每個來源是否真的連得上，連不上印出實際錯誤）、
+**Ingestion**（每個 dataset 的 provider 筆數 vs 寫入 / quarantine / suspect）、
+**Coverage**（每張表的筆數、日期範圍、股票數，以及**區間內有幾個交易日完全沒有資料**）、
+**Failures and gaps**（quarantine 依 dataset 與規則分組、freshness、
+日曆與成交量的交叉驗證、backfill checkpoint 狀態）。
 
-執行後請把 `market/data-operations` 的輸出給我，我會把實測數字補進本報告的 §3、§7。
+三個刻意的設計：
+
+- **不估算任何東西。** 每個數字不是 provider 回應讀出來的，就是資料庫數出來的；
+  量不到的印出量不到的原因，不會用 0 頂替。
+- **單一 dataset 失敗不中止整輪** —— 一次跑完要能看到所有問題，不是第一個。
+- **最上面印出 transport。** `PROVIDER_MODE` 不是 `live` 時會有一整片警告橫幅，
+  說明這些數字描述的是錄製的 fixture 而不是交易所。這份報告是要拿來引用的，
+  所以它必須對「自己量了什麼」毫不含糊。
+
+資料庫沒 migrate 或來源沒 seed 時，它會印一行指示而不是六十行 traceback。
+
+跑完把輸出（或 `report.json`）給我，我把實測數字補進 §3、§7。
 
 ---
 

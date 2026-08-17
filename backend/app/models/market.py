@@ -377,11 +377,29 @@ class CorporateAction(Base):
     payment_date: Mapped[date | None] = mapped_column(Date)
     record_date: Mapped[date | None] = mapped_column(Date)
 
+    # Per-share economics. Which of these are populated is fixed by
+    # `action_type`; see EXPECTED_FIELDS in providers/corporate_actions.py.
     cash_dividend: Mapped[Decimal | None] = mapped_column(Numeric(18, 6))
     stock_dividend: Mapped[Decimal | None] = mapped_column(Numeric(18, 6))
     split_ratio: Mapped[Decimal | None] = mapped_column(Numeric(18, 6))
     subscription_price: Mapped[Decimal | None] = mapped_column(MONEY)
     subscription_ratio: Mapped[Decimal | None] = mapped_column(Numeric(18, 6))
+
+    # A cash capital reduction returns money *and* cancels shares, so it needs
+    # both this and `split_ratio`. It is kept apart from `cash_dividend` because
+    # the two are not the same event: a dividend is a distribution of earnings
+    # and a reduction is a return of capital. They are taxed differently, they
+    # are analysed differently, and collapsing them would make it impossible to
+    # tell afterwards which one happened.
+    cash_returned_per_share: Mapped[Decimal | None] = mapped_column(Numeric(18, 6))
+
+    # What the exchange itself published either side of the event, where the
+    # source provides it. These are never used to compute the adjustment — they
+    # are used to check it. A factor derived from the economics and then
+    # reconciled against the exchange's own reference price is a factor that can
+    # be shown to be right rather than merely asserted.
+    reference_price_before: Mapped[Decimal | None] = mapped_column(MONEY)
+    reference_price_after: Mapped[Decimal | None] = mapped_column(MONEY)
 
     # Single-day factor. The cumulative factor on a price row is the running
     # product of these, computed backwards from the present.
@@ -403,8 +421,63 @@ class CorporateAction(Base):
             name="action_type_allowed",
         ),
         CheckConstraint("factor > 0", name="factor_positive"),
+        CheckConstraint(
+            "(reference_price_before IS NULL OR reference_price_before > 0) AND "
+            "(reference_price_after IS NULL OR reference_price_after > 0)",
+            name="reference_prices_positive",
+        ),
+        CheckConstraint(
+            "cash_returned_per_share IS NULL OR cash_returned_per_share >= 0",
+            name="cash_returned_non_negative",
+        ),
         Index("ix_corporate_actions_symbol", "symbol", "ex_date"),
         Index("ix_corporate_actions_pit", "symbol", "announced_at"),
+    )
+
+
+# --------------------------------------------------------------------------
+class CorporateActionCoverage(Base):
+    """What we have actually looked for, per symbol, and over what range.
+
+    Without this table, an empty `corporate_actions` result is ambiguous in the
+    worst possible way: "this company paid no dividend" and "nobody has ever
+    fetched dividends for this company" are the same answer. Adjusting a price
+    series on the first reading when the truth is the second silently deletes a
+    real adjustment, and the resulting return series looks perfectly plausible.
+
+    So coverage is recorded as a positive fact. The adjustment pipeline refuses
+    to run outside it — see `CorporateActionCoverageService.assert_adjustable`.
+
+    `action_types` is stored because sources differ in what they can see. A
+    source that reports dividends but not capital reductions gives real coverage
+    for one and none for the other, and a single boolean cannot say that.
+    """
+
+    __tablename__ = "corporate_action_coverage"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+
+    symbol: Mapped[str] = mapped_column(String(10), nullable=False)
+    market: Mapped[str] = mapped_column(String(10), nullable=False)
+    source: Mapped[str] = mapped_column(String(20), nullable=False)
+
+    covered_from: Mapped[date] = mapped_column(Date, nullable=False)
+    covered_to: Mapped[date] = mapped_column(Date, nullable=False)
+    action_types: Mapped[list[str]] = mapped_column(JSONB, nullable=False)
+
+    actions_found: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    verified_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+    ingestion_id: Mapped[int | None] = provenance_column()
+    ingested_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    __table_args__ = (
+        UniqueConstraint("symbol", "market", "source", name="uq_corporate_action_coverage_key"),
+        CheckConstraint("covered_to >= covered_from", name="coverage_window"),
+        CheckConstraint("actions_found >= 0", name="actions_found_non_negative"),
+        Index("ix_corporate_action_coverage_symbol", "symbol", "market"),
     )
 
 

@@ -1021,8 +1021,10 @@ deliberately not a copy.
 | **019** | `disabled` is a first-class health status, distinct from `degraded` | Accepted | An intentionally-disabled component reports `disabled` and never degrades system status. | [→](adr/ADR-019-disabled-is-a-first-class-health-status-distinct-from-degrad.md) |
 | **020** | Refresh tokens rotate on use and are revocable | Accepted | Refresh tokens rotate on use and land on a Redis denylist, making theft detectable and logout real. | [→](adr/ADR-020-refresh-tokens-rotate-on-use-and-are-revocable.md) |
 | **021** | The dashboard shows empty states, never placeholder numbers | Accepted | Panels without a data source render an empty state — never a sample number, never a zero. | [→](adr/ADR-021-the-dashboard-shows-empty-states-never-placeholder-numbers.md) |
+| **022** | Corporate actions are a separate provider abstraction | Accepted | A dedicated `CorporateActionProvider`, resolved from the registry; no exchange endpoint reaches the domain or service layer. | [→](adr/ADR-022-corporate-actions-are-a-separate-provider-abstraction.md) |
+| **023** | Adjusted prices require verified corporate action coverage | Accepted | Adjustment raises unless coverage for that symbol and range was recorded; an empty result is not evidence that nothing happened. | [→](adr/ADR-023-adjustment-requires-verified-corporate-action-coverage.md) |
 
-**Phase 0** produced ADR-001 – ADR-012 (system shape and principles). **Phase 1** produced ADR-013 – ADR-021 (decisions forced by building it, three of which were prompted by defects the test suite found).
+**Phase 0** produced ADR-001 – ADR-012 (system shape and principles). **Phase 1** produced ADR-013 – ADR-021 (decisions forced by building it, three of which were prompted by defects the test suite found). **Phase 3 design** produced ADR-022 – ADR-023 (corporate actions, and the precondition they impose on every adjusted series).
 
 Adding a decision: copy the structure of an existing file, take the next number, and add one row here. A decision worth arguing about later is worth a file; a decision nobody will question does not need one.
 -----|------|------|-------------|
