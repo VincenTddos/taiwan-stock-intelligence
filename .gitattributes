@@ -1,0 +1,36 @@
+# Normalise line endings in the repository.
+#
+# The working copy on Windows is CRLF; every commit so far was made on Linux
+# with LF. Without this file that difference is invisible until someone commits
+# from Windows, at which point git records a 149-file, 29,923-line change that
+# alters nothing. Real changes then become unreviewable, because they are buried
+# in whitespace.
+#
+# `text=auto eol=lf` stores LF in the repository and lets git check out whatever
+# the platform wants. Nobody has to configure core.autocrlf on their machine.
+* text=auto eol=lf
+
+# Binary — never touch these.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary
+*.zip binary
+*.7z binary
+*.bundle binary
+*.mp4 binary
+*.woff binary
+*.woff2 binary
+
+# Recorded exchange responses are evidence. They are committed byte-for-byte and
+# must never be rewritten by a line-ending or whitespace filter — the trailing
+# spaces and leading-space zeroes in them are exactly what the parsers are
+# tested against.
+backend/tests/fixtures/** -text
+
+# Windows scripts genuinely need CRLF to run.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
