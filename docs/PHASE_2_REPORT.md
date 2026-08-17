@@ -450,9 +450,9 @@ Phase 3（Quant Engine）需要的 canonical 資料，Phase 2 是否備妥：
 | 25 | Backtest availability tests | ✅ | `available_at` 用知曉時間 |
 | 26 | No fake production data | ✅ | `ALLOW_MOCK_DATA` + `PROVIDER_MODE` 雙重 production 防護 |
 | 27 | Documentation updated | ✅ | 本報告 + ADR 重整 + fixtures README |
-| 28 | CI green | ⏳ | 第一次執行紅燈，抓到 4 個本地測不到的問題（見 §17）；已修，待第二次執行確認 |
+| 28 | CI green | ✅ | 五個 job 全綠（run #4）。前三次紅燈共抓到 7 個本地測不到的問題，見 §17 |
 
-**26 項完成、1 項需外部來源（corporate actions）、1 項待 CI 第二次執行確認。**
+**27 項完成、1 項需外部來源（corporate actions）。**
 
 ---
 
@@ -464,8 +464,7 @@ Phase 3（Quant Engine）需要的 canonical 資料，Phase 2 是否備妥：
 
 1. **在有網路的機器執行 §11**，把 `data-operations` 輸出給我，我補上實測覆蓋數字
 2. **Corporate actions 來源的決定** —— TWSE `t187ap45_L`（股利分派）是已驗證的 OpenAPI 端點，是最省事的起點；MOPS 涵蓋更全但脆弱
-3. 確認 CI 第二次執行轉綠
-4. 確認後再下 Phase 3 指令
+3. 確認後再下 Phase 3 指令
 
 ---
 
@@ -507,13 +506,14 @@ Docker build、`pnpm/action-setup` 三者都讀它，一處釘死三處一致。
 順帶一提，inline 的 `# gitleaks:allow` 註解在這裡沒用 ——
 掃描涵蓋每一個 commit，那些值留在 Phase 1 的 blob 裡，改現在的檔案沒有意義。
 
-### 第二、三次執行
+### 四次執行才轉綠
 
 | 執行 | 結果 |
 |------|------|
-| #1 | Backend / Frontend / Secret scan / Docker 四個全紅 |
-| #2 | Secret scan ✅、Docker ✅（真的建出兩個映像檔）、Frontend ✗、Backend ✗ |
-| #3 | 待確認 |
+| #1 | Backend / Frontend / Secret scan / Docker 四個全紅；`compose` 被 skip |
+| #2 | Secret scan ✅、Docker ✅（真的建出兩個映像檔）、Frontend ✗、Backend ✗；`compose` 仍被 skip |
+| #3 | 前四個全綠；`compose` **首次執行**並失敗 |
+| #4 | **五個全綠。** Backend 2m · Compose 1m · Docker 5m · Frontend 47s · Secret scan 4s |
 
 **Frontend #2**：`pnpm/action-setup` 讀的是 repo 根目錄的 `package.json`，
 而前端在 `web/` 底下 —— 上一輪加的 `packageManager` 欄位放在它從來不會去看的地方。
@@ -548,10 +548,50 @@ dev extras 裡宣告了 `types-redis`。redis 從 5.0 起就內建 `py.typed`，
 **照樣回報 phase gate passed**。一個不可能失敗的檢查比沒有檢查更糟，
 因為它會被計入。已加上防護：mypy 非零就 dump log 並中斷。
 
+### Compose #3 —— 一個不可能通過的健康檢查
+
+`compose` 因為 `needs: [backend, frontend]`，前兩次都被 skip，
+所以第三次是它**有史以來第一次執行**。
+
+```yaml
+test: ["CMD", "celery", ..., "-d", "celery@$$HOSTNAME"]
+```
+
+`CMD` 是 exec 形式：Docker 直接執行這串 argv，**不經過 shell**，
+所以 `$HOSTNAME` 永遠不會展開。celery 被要求去 ping 一個字面上叫
+`celery@$HOSTNAME` 的節點。**這個檢查在任何情況下都不可能通過** ——
+worker 永遠不會 healthy，`compose up --wait` 兩分鐘後放棄。改用 `CMD-SHELL`。
+
+api 的健康檢查是同一個病的另一面：它接受任何 `< 500` 的狀態碼，
+所以 **404 算健康**。探測路徑打錯字、或路由搬家，都會產生一個
+「自稱一切正常、實際什麼都沒服務」的容器。改成必須 200。
+
+同時把 build 和 start 拆成兩個 CI step —— 併成一行時它們共用一個時間和一個
+結束碼，「build 很慢」和「容器不健康」讀起來一模一樣。失敗時現在會先印出
+每個容器的 state、health status 和最後一次 healthcheck 的輸出，
+不健康的是哪一個服務會被直接寫出來，不用從 200 行 log tail 裡猜。
+
 ### 這一段的結論
 
+七個缺陷，分四次執行才全部浮出來，**沒有一個是程式邏輯的錯**。
+分類起來只有三種：
+
+1. **版控裡少了東西**（models 套件）
+2. **環境在別處解析成別的樣子**（pnpm 版本、types-redis stub、Next 的 CVE）
+3. **檢查本身不可能失敗**（gitleaks 沒跑過、`mypy | tail` 吃掉結束碼、
+   healthcheck 收 404、worker healthcheck 收 `$HOSTNAME` 字面值）
+
+第三類最值得記住。這個專案在 CI 第一次執行前，帳面上有一整排通過的檢查，
+其中有幾道**在結構上不可能報錯** —— 它們被計入了信心，卻沒有提供任何信心。
+一個不可能失敗的檢查比沒有檢查更糟，正因為它會被計入。
+
 本地 gate 現在有五道（lint、typecheck、test、migration、clean-clone），
-但**沒有一道能取代 CI**。CI 的價值不在於重跑同樣的測試，
-而在於它是在一台**沒有這個專案任何殘留狀態**的機器上，從版控裡的內容重新建起來。
-本地 gate 回答「我寫的東西對不對」，CI 回答「這份 repo 是不是完整的」。
-今天這兩個問題的答案不一樣。
+其中 clone-check 已經強化到會重建整個環境。但**沒有一道能取代 CI**。
+CI 的價值不在於重跑同樣的測試，而在於它是在一台**沒有這個專案任何殘留狀態**
+的機器上，從版控裡的內容重新建起來。本地 gate 回答「我寫的東西對不對」，
+CI 回答「這份 repo 是不是完整的」。這兩個問題的答案，今天不一樣了四次。
+
+**Run #4：五個 job 全綠。** `verify_stack.sh` 也在 compose job 裡真的跑過了 ——
+整套 stack（postgres + redis + migrate + api + worker + beat + web）
+在一台乾淨的機器上從版控內容建起來、啟動、並通過健康驗證。
+這是 `v0.2.1-phase2` 標記的狀態。
