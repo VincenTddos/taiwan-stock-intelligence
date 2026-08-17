@@ -31,6 +31,11 @@ x-app-env: &app-env
   ENABLE_LLM: ${ENABLE_LLM:-false}
   OLLAMA_BASE_URL: http://ollama:11434
   ALLOW_MOCK_DATA: ${ALLOW_MOCK_DATA:-true}
+  # Defaults to live. Passed explicitly rather than left to the app's own
+  # default so that where a number came from is visible in the file that
+  # starts the stack, and so an offline demo can be switched to replay
+  # without editing code.
+  PROVIDER_MODE: ${PROVIDER_MODE:-live}
   CORS_ORIGINS: '["http://localhost:3000"]'
 
 services:
