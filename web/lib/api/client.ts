@@ -228,6 +228,94 @@ export interface MarketStatus {
   updated_at: string;
 }
 
+export interface IndicatorSpec {
+  name: string;
+  category: string;
+  description: string;
+  inputs: string[];
+  lookback_sessions: number;
+  params: Record<string, unknown>;
+}
+
+export interface FactorSpec {
+  name: string;
+  category: string;
+  description: string;
+  formula: string;
+  inputs: string[];
+  lookback_days: number;
+  min_periods: number;
+  direction: number;
+  winsorize: number[] | null;
+  standardize: string;
+  neutralize: string[];
+  /** Null until the factor has been graded over a window. */
+  verdict: "PASS" | "RESEARCH_ONLY" | "INSUFFICIENT_DATA" | "NOT_COMPUTABLE" | null;
+  metrics: FactorMetrics | null;
+  evaluated_from: string | null;
+  evaluated_to: string | null;
+}
+
+export interface FactorMetrics {
+  dates: number;
+  mean_symbols: number;
+  ic: number | null;
+  rank_ic: number | null;
+  ic_ir: number | null;
+  coverage: number | null;
+  stability: number | null;
+  spread_return: number | null;
+  spread_t_stat: number | null;
+  max_correlation: number | null;
+  correlated_with: string | null;
+  failures: string[];
+  missing_inputs: string[];
+}
+
+export interface StockIndicators {
+  symbol: string;
+  trading_date: string;
+  /** ADJUSTED or RAW — never assume; an unadjusted series gaps on ex-dates. */
+  price_basis: string;
+  indicators: Record<string, number | null>;
+}
+
+export interface StockFactor {
+  factor: string;
+  category: string;
+  raw_value: string | null;
+  zscore: string | null;
+  percentile: string | null;
+  sector_zscore: string | null;
+  score: string | null;
+}
+
+export interface FactorRanking {
+  rank: number;
+  symbol: string;
+  name: string | null;
+  raw_value: string | null;
+  score: string | null;
+  percentile: string | null;
+}
+
+export interface ScreenerCondition {
+  factor: string;
+  field: "score" | "zscore" | "percentile" | "raw_value";
+  op: "gt" | "gte" | "lt" | "lte" | "between";
+  value: number | null;
+  upper?: number | null;
+}
+
+export interface ScreenerRow {
+  symbol: string;
+  name: string | null;
+  values: Record<
+    string,
+    { score: string | null; zscore: string | null; percentile: string | null; raw_value: string | null }
+  >;
+}
+
 export interface CurrentUser {
   id: number;
   email: string;
@@ -252,6 +340,23 @@ export const api = {
   capabilities: () => request<Capabilities>("/meta/capabilities", { auth: false }),
   dataOperations: () => request<DataOperations>("/market/data-operations", { auth: false }),
   marketStatus: () => request<MarketStatus>("/market/status", { auth: false }),
+  indicatorCatalogue: () => request<IndicatorSpec[]>("/quant/indicators/catalogue", { auth: false }),
+  factorCatalogue: () => request<FactorSpec[]>("/quant/factors/catalogue", { auth: false }),
+  stockIndicators: (symbol: string) =>
+    request<StockIndicators>(`/stocks/${encodeURIComponent(symbol)}/indicators`, { auth: false }),
+  stockFactors: (symbol: string) =>
+    request<StockFactor[]>(`/stocks/${encodeURIComponent(symbol)}/factors`, { auth: false }),
+  factorRanking: (factor: string, order: "top" | "bottom" = "top", limit = 20) =>
+    request<FactorRanking[]>(
+      `/factors/ranking?factor=${encodeURIComponent(factor)}&order=${order}&limit=${limit}`,
+      { auth: false },
+    ),
+  screener: (conditions: ScreenerCondition[], sortBy: string | null, limit = 100) =>
+    request<ScreenerRow[]>("/screener", {
+      method: "POST",
+      auth: false,
+      body: { conditions, sort_by: sortBy, limit, descending: true },
+    }),
   workerEcho: (message: string) =>
     request<{ dispatched: boolean; task_id: string; completed: boolean; result?: unknown; error?: string }>(
       `/health/worker/echo?message=${encodeURIComponent(message)}`,

@@ -123,6 +123,31 @@ API  →  Redis (broker)  →  Celery worker  →  Task
 
 ---
 
+## 資料與量化
+
+```bash
+# 市場資料
+make seed-sources                 # 來源登錄與新鮮度契約
+make ingest-calendar YEAR=2026    # 交易日曆（先跑，其他 ingestion 靠它守門）
+make ingest-all                   # 主檔 + 最新一個交易日
+
+# 公司行動與還原
+make ingest-corporate-actions FROM=2019-01-01 TO=2026-12-31
+make adjust FROM=2019-01-01 TO=2026-08-14     # 覆蓋不足時會拒絕，並指名缺什麼
+
+# 量化引擎
+make quant-compute DATE=2026-08-14            # 該日全市場指標 + 因子
+make quant-backfill FROM=2026-01-02 TO=2026-08-14
+make quant-validate FROM=2026-02-02 TO=2026-08-14   # 因子有效性報告
+```
+
+`quant-compute` 會印出它**沒能**算的東西：缺輸入的因子、缺的欄位、
+以及還原被拒絕時的原因。這不是警告，是那一輪計算的一部分 ——
+所有指標都寫著 `price_basis`（`ADJUSTED` 或 `RAW`），因為一個說不出自己
+用哪種價格算的數字，事後沒有人能查核。
+
+---
+
 ## Testing
 
 ```bash

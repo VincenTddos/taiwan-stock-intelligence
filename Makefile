@@ -133,7 +133,7 @@ clone-check: ## Clone fresh, install fresh, typecheck — what CI actually does
 		tail -1 mypy.log | sed 's/^/  /' && \
 		PYTHONPATH=/tmp/twquant-clonecheck/backend python -c \
 		"from app.main import create_app; from app.db.base import Base; \
-		 import app.models.market, app.models.ops, app.models.user, app.models.platform; \
+		 import app.models.market, app.models.ops, app.models.user, app.models.platform, app.models.quant; \
 		 assert create_app(); print(f'  clean clone imports — {len(Base.metadata.tables)} tables')"
 	@rm -rf /tmp/twquant-clonecheck
 
@@ -150,7 +150,7 @@ verify: ## Probe a running stack and print a health summary
 
 # ---------------------------------------------------------------- ingestion
 .PHONY: seed-sources ingest-calendar ingest-daily ingest-all backfill \
-	ingest-corporate-actions adjust
+	ingest-corporate-actions adjust quant-compute quant-backfill quant-validate
 seed-sources: ## Seed the data source registry and freshness contracts
 	cd $(BACKEND) && . .venv/bin/activate && python -m scripts.seed_sources
 
@@ -173,6 +173,18 @@ adjust: ## Adjustment factors and adjusted closes:  make adjust FROM=2019-01-01 
 		python -m scripts.ingest adjust \
 		--from $(or $(FROM),2019-01-01) --to $(or $(TO),$(shell date +%Y-%m-%d)) \
 		$(if $(SYMBOL),--symbol $(SYMBOL),)
+
+quant-compute: ## Indicators + factors for one session:  make quant-compute DATE=2026-08-14
+	cd $(BACKEND) && . .venv/bin/activate && \
+		python -m scripts.quant compute --date $(or $(DATE),$(shell date +%Y-%m-%d))
+
+quant-backfill: ## Recompute indicators + factors over a range
+	cd $(BACKEND) && . .venv/bin/activate && \
+		python -m scripts.quant backfill --from $(FROM) --to $(TO)
+
+quant-validate: ## Grade every factor over a window:  make quant-validate FROM=2026-01-01 TO=2026-08-14
+	cd $(BACKEND) && . .venv/bin/activate && \
+		python -m scripts.quant validate --from $(FROM) --to $(TO)
 
 backfill: ## Resumable backfill:  make backfill DATASET=institutional_flow FROM=2019-01-01 TO=2026-08-15
 	cd $(BACKEND) && . .venv/bin/activate && \

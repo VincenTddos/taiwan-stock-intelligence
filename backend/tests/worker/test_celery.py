@@ -109,3 +109,30 @@ def test_end_to_end_dispatch_through_broker():
     assert payload["task_id"] == async_result.id
     assert payload["components"]["redis"]["status"] == "healthy"
     assert payload["components"]["postgres"]["status"] == "healthy"
+
+
+class TestQuantSchedule:
+    """The daily quant job is scheduled, not triggered by hand.
+
+    Phase 2 declared `q_compute` and left it empty; a queue with no task is a
+    queue nobody notices is broken.
+    """
+
+    def test_the_daily_task_is_registered_and_routed(self):
+        import app.workers.tasks.quant  # noqa: F401 - registers the task
+        from app.workers.celery_app import celery_app
+
+        assert "quant.daily" in celery_app.tasks
+        schedule = celery_app.conf.beat_schedule["quant-daily"]
+        assert schedule["task"] == "quant.daily"
+        assert schedule["options"]["queue"] == "q_compute"
+
+    def test_the_schedule_expires_so_a_backlog_cannot_build(self):
+        """A worker down overnight must not wake to eight identical full-market runs.
+
+        The task is idempotent, so the result would be correct; the cost would
+        be eight computations of a session that already has its numbers.
+        """
+        from app.workers.celery_app import celery_app
+
+        assert celery_app.conf.beat_schedule["quant-daily"]["options"]["expires"] > 0

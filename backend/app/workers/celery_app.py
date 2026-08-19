@@ -8,6 +8,7 @@ tasks exist, and an idle queue costs nothing.
 from __future__ import annotations
 
 from celery import Celery
+from celery.schedules import crontab
 from celery.signals import setup_logging, worker_ready, worker_shutting_down
 
 from app.core.config import get_settings
@@ -20,7 +21,7 @@ celery_app = Celery(
     "twquant",
     broker=settings.redis_broker_url,
     backend=settings.redis_result_url,
-    include=["app.workers.tasks.health"],
+    include=["app.workers.tasks.health", "app.workers.tasks.quant"],
 )
 
 celery_app.conf.update(
@@ -49,6 +50,19 @@ celery_app.conf.update(
             "task": "maint.heartbeat",
             "schedule": 30.0,
             "options": {"queue": "q_maint", "expires": 60},
+        },
+        # 18:30 Taipei, which is UTC+8 — so 10:30 UTC. Well after the exchange's
+        # end-of-day files are published and after the ingestion window, and
+        # early enough that a failure can be noticed the same evening.
+        #
+        # `expires` matters more than it looks: a worker that was down all night
+        # must not wake up and run a stale schedule against a session whose data
+        # has since been superseded. The task is idempotent, but a queue of
+        # eight identical jobs is still eight full-market computations.
+        "quant-daily": {
+            "task": "quant.daily",
+            "schedule": crontab(hour="10", minute="30"),
+            "options": {"queue": "q_compute", "expires": 3600},
         },
     },
 )
