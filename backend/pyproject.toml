@@ -29,6 +29,11 @@ dev = [
     "pytest>=8.3.0",
     "pytest-asyncio>=0.24.0",
     "pytest-cov>=6.0.0",
+    # conftest imports this, so the suite cannot collect without it. It was
+    # installed ad hoc by CI and by clone-check and declared nowhere, which
+    # meant `pip install -e ".[dev]" && pytest` — the sequence the contributing
+    # guide gives — failed on a fresh machine at the first import.
+    "asgi-lifespan>=2.1.0",
     "ruff>=0.8.0",
     "mypy>=1.13.0",
     # No types-redis. redis ships py.typed and has since 5.0, and mypy prefers

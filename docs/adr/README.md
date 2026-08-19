@@ -15,6 +15,8 @@ This directory holds the reasoning.
 |-------|-------|-----------|
 | 001–012 | 0 — Architecture | System shape and principles, decided before any code existed |
 | 013–021 | 1 — Foundation | Decisions forced by building it. Three (016, 018, and the `public/` fix noted in 013) came from defects the test suite found |
+| 022–023 | 3 — design | Corporate actions, and the precondition they impose on every adjusted series |
+| 024–025 | 2.5 — Corporate actions | Decisions forced by the live endpoints: what the factor *is*, and what coverage has to mean for the guard to be worth passing |
 
 Numbers are never reused. A superseded ADR keeps its number and gains a
 `Superseded by` link; the replacement gains a `Supersedes` link.

@@ -405,7 +405,9 @@ class CorporateAction(Base):
     # product of these, computed backwards from the present.
     factor: Mapped[Decimal] = mapped_column(RATIO, nullable=False, default=Decimal(1))
 
-    source: Mapped[str] = mapped_column(String(20), nullable=False)
+    # The provider code, not the exchange: the three TWSE corporate action
+    # endpoints see different action types, and coverage unions across them.
+    source: Mapped[str] = mapped_column(String(30), nullable=False)
     ingestion_id: Mapped[int | None] = provenance_column()
     ingested_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
@@ -459,7 +461,9 @@ class CorporateActionCoverage(Base):
 
     symbol: Mapped[str] = mapped_column(String(10), nullable=False)
     market: Mapped[str] = mapped_column(String(10), nullable=False)
-    source: Mapped[str] = mapped_column(String(20), nullable=False)
+    # The provider code, not the exchange: the three TWSE corporate action
+    # endpoints see different action types, and coverage unions across them.
+    source: Mapped[str] = mapped_column(String(30), nullable=False)
 
     covered_from: Mapped[date] = mapped_column(Date, nullable=False)
     covered_to: Mapped[date] = mapped_column(Date, nullable=False)

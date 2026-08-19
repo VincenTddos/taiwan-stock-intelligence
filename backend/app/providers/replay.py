@@ -33,6 +33,7 @@ from app.core.config import AppEnv, Settings, get_settings
 from app.core.logging import get_logger
 from app.models.ops import Transport
 from app.providers import twse
+from app.providers import twse_corporate_actions as twse_ca
 from app.providers.base import (
     BaseMarketDataProvider,
     ProviderError,
@@ -41,6 +42,7 @@ from app.providers.base import (
     ProviderResult,
     SourceMetadata,
 )
+from app.providers.corporate_actions import CorporateActionProvider
 from app.providers.normalize import parse_roc_date
 
 log = get_logger(__name__)
@@ -250,4 +252,114 @@ class ReplayProvider(BaseMarketDataProvider):
         )
 
 
-__all__ = ["FIXTURES", "REPLAY_HISTORY_MONTH", "REPLAY_HISTORY_SYMBOL", "ReplayProvider"]
+# ------------------------------------------------------------ corporate actions
+#: Endpoint URL -> recording. Keyed by URL rather than by dataset because all
+#: three corporate action endpoints share the dataset name `corporate_actions`;
+#: what distinguishes them is which one was called.
+CORPORATE_ACTION_RECORDINGS: dict[str, str] = {
+    twse_ca.FORECAST_ENDPOINT: "twt48u_all_1150817.json",
+    twse_ca.RESULTS_ENDPOINT: "twt49u_2026.json",
+    twse_ca.REDUCTION_ENDPOINT: "twtauu_2019_2026.json",
+}
+
+
+class ReplayFetcher:
+    """A `JsonFetcher` that answers from recordings instead of the network.
+
+    Deliberately a transport rather than a provider. The corporate action
+    providers keep their real parsers, their real `supported_actions` and their
+    real error taxonomy; only the bytes arrive from disk. A replayed run
+    therefore exercises the code that will run against the exchange, which is
+    the entire point of keeping the recordings.
+
+    Contrast with `ReplayProvider`, which had to be a provider because the price
+    endpoints predate this seam. New code should take this one.
+    """
+
+    def __init__(
+        self,
+        *,
+        source: str,
+        recordings: dict[str, str],
+        fixture_dir: Path | None = None,
+        settings: Settings | None = None,
+    ) -> None:
+        settings = settings or get_settings()
+        if settings.APP_ENV is AppEnv.PRODUCTION:
+            raise RuntimeError("replay transport is not permitted in production")
+        self.source = source
+        self.recordings = recordings
+        self.fixture_dir = fixture_dir or DEFAULT_FIXTURE_DIR
+
+    async def fetch_json(
+        self, path: str, *, dataset: str, params: dict[str, Any] | None = None
+    ) -> tuple[Any, SourceMetadata]:
+        filename = self.recordings.get(path)
+        if filename is None:
+            # Not a fallback to "no data". An endpoint nobody recorded is an
+            # endpoint this run cannot honestly answer for, and saying so keeps
+            # a replayed suite from reporting coverage it does not have.
+            raise ProviderError(
+                ProviderErrorKind.NOT_SUPPORTED,
+                f"no recording for endpoint {path}",
+                source=self.source,
+                endpoint=path,
+            )
+        file = self.fixture_dir / filename
+        if not file.is_file():
+            raise ProviderError(
+                ProviderErrorKind.CONFIG_ERROR,
+                f"recording missing: {file}",
+                source=self.source,
+                endpoint=path,
+            )
+
+        body = file.read_bytes()
+        now = datetime.now(UTC)
+        meta = SourceMetadata(
+            source=self.source,
+            source_endpoint=path,
+            dataset=dataset,
+            transport=Transport.REPLAY,
+            source_request_at=now,
+            source_response_at=now,
+            params={"recording": filename, **(params or {})},
+            http_status=200,
+            duration_ms=0,
+            response_bytes=len(body),
+            response_hash=hashlib.sha256(body).hexdigest(),
+        )
+        return json.loads(body), meta
+
+    async def aclose(self) -> None:
+        return None
+
+
+def replay_corporate_action_provider(
+    provider_type: str,
+    implementations: dict[str, type[CorporateActionProvider]],
+    *,
+    settings: Settings | None = None,
+    fixture_dir: Path | None = None,
+) -> CorporateActionProvider:
+    """Build the real corporate action provider on a replayed transport."""
+    impl = implementations[provider_type]
+    return impl(
+        fetcher=ReplayFetcher(
+            source=impl.code,
+            recordings=CORPORATE_ACTION_RECORDINGS,
+            fixture_dir=fixture_dir,
+            settings=settings,
+        )
+    )
+
+
+__all__ = [
+    "CORPORATE_ACTION_RECORDINGS",
+    "FIXTURES",
+    "REPLAY_HISTORY_MONTH",
+    "REPLAY_HISTORY_SYMBOL",
+    "ReplayFetcher",
+    "ReplayProvider",
+    "replay_corporate_action_provider",
+]

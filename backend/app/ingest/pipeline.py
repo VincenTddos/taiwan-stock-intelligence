@@ -163,6 +163,13 @@ TARGETS: dict[str, tuple[type[Any], list[str], list[str]]] = {
             "split_ratio",
             "subscription_price",
             "subscription_ratio",
+            # Omitted until 2026-08-19, which meant a re-ingestion could insert
+            # these on a first write and then never correct them. They are the
+            # two numbers the adjustment is reconciled against, so a stale one
+            # would make a wrong factor look confirmed.
+            "cash_returned_per_share",
+            "reference_price_before",
+            "reference_price_after",
             "factor",
             "ingestion_id",
         ],
@@ -179,6 +186,7 @@ VALIDATORS: dict[str, str] = {
     "index_quotes": "validate_index_quote",
     "institutional_flow": "validate_institutional_flow",
     "stock_master": "validate_stock_master",
+    "corporate_actions": "validate_corporate_action",
 }
 
 

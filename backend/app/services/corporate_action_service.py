@@ -56,6 +56,34 @@ PRICE_AFFECTING: frozenset[CorporateActionType] = frozenset(
 )
 
 
+#: What must actually be covered before a symbol in a given market may be
+#: adjusted. Narrower than `PRICE_AFFECTING`, because a requirement no source in
+#: that market can ever satisfy is not a safeguard — it is a guard that never
+#: opens, and a guard that never opens gets bypassed.
+#:
+#: Taiwan publishes no split event. A Taiwanese "split" is executed as a 無償配股
+#: (a stock dividend, which the ex-rights tables do report) or as a 面額變更, and
+#: the reverse direction as a 減資 (a capital reduction, reported separately).
+#: So SPLIT and REVERSE_SPLIT remain in `PRICE_AFFECTING` — they would move a
+#: price if one occurred, and the schema must be able to hold one — while not
+#: being demanded of a TWSE symbol, where no source will ever produce them.
+REQUIRED_FOR_ADJUSTMENT: dict[str, frozenset[CorporateActionType]] = {
+    "TWSE": frozenset(
+        {
+            CorporateActionType.CASH_DIVIDEND,
+            CorporateActionType.STOCK_DIVIDEND,
+            CorporateActionType.RIGHTS_ISSUE,
+            CorporateActionType.CAPITAL_REDUCTION,
+        }
+    ),
+}
+
+
+def required_action_types(market: str) -> frozenset[CorporateActionType]:
+    """The coverage a market's symbols must have. Unknown markets get the strict set."""
+    return REQUIRED_FOR_ADJUSTMENT.get(market, PRICE_AFFECTING)
+
+
 class AdjustmentNotPermitted(RuntimeError):
     """Raised when a price series may not legitimately be adjusted yet.
 
@@ -159,11 +187,11 @@ class CorporateActionCoverageService:
         start: date,
         end: date,
         market: str = "TWSE",
-        required: frozenset[CorporateActionType] = PRICE_AFFECTING,
+        required: frozenset[CorporateActionType] | None = None,
     ) -> list[CoverageGap]:
         """Every reason the requested symbols may not be adjusted. Empty is a pass."""
         found: list[CoverageGap] = []
-        needed = {str(a) for a in required}
+        needed = {str(a) for a in (required or required_action_types(market))}
 
         for symbol in symbols:
             rows = await self.coverage_for(symbol, market)
@@ -179,25 +207,39 @@ class CorporateActionCoverageService:
                 )
                 continue
 
-            # Union across sources: one source may cover dividends and another
-            # capital reductions, and together they can be complete.
+            # Union across sources, but *per action type*. One source may cover
+            # dividends and another capital reductions, and together they can be
+            # complete — that is the arrangement TWSE forces, since no single
+            # endpoint sees everything.
+            #
+            # Taking the union of ranges and the union of types separately, as
+            # this did until 2026-08-19, is not the same statement and is far
+            # too generous: a source covering 2019 to today for dividends plus a
+            # forward-only source covering rights issues from today reads as
+            # "2019 to today, every type" — the precise false confidence this
+            # table exists to make impossible. Each type has to be able to name
+            # the range *it* was searched over.
             covered_from = min(r.covered_from for r in rows)
             covered_to = max(r.covered_to for r in rows)
-            covered_types = {t for r in rows for t in r.action_types}
-            missing = needed - covered_types
 
-            if covered_from > start or covered_to < end:
-                found.append(
-                    CoverageGap(
-                        symbol=symbol,
-                        market=market,
-                        reason="coverage does not span the requested range",
-                        requested=(start, end),
-                        covered=(covered_from, covered_to),
-                        missing_action_types=frozenset(missing),
-                    )
-                )
-            elif missing:
+            never_searched: set[str] = set()
+            short: dict[str, tuple[date, date]] = {}
+            for action_type in needed:
+                relevant = [r for r in rows if action_type in r.action_types]
+                if not relevant:
+                    never_searched.add(action_type)
+                    continue
+                # Still a union of ranges rather than an interval algebra: a
+                # hole between two disjoint runs for the same type is not
+                # detected. Ingestion advances a contiguous window, so the hole
+                # would have to be created deliberately — recorded here because
+                # it is a real limit, not because it is a likely one.
+                type_from = min(r.covered_from for r in relevant)
+                type_to = max(r.covered_to for r in relevant)
+                if type_from > start or type_to < end:
+                    short[action_type] = (type_from, type_to)
+
+            if never_searched:
                 found.append(
                     CoverageGap(
                         symbol=symbol,
@@ -205,7 +247,21 @@ class CorporateActionCoverageService:
                         reason="some price-affecting action types were never searched for",
                         requested=(start, end),
                         covered=(covered_from, covered_to),
-                        missing_action_types=frozenset(missing),
+                        missing_action_types=frozenset(never_searched),
+                    )
+                )
+            elif short:
+                found.append(
+                    CoverageGap(
+                        symbol=symbol,
+                        market=market,
+                        reason="coverage does not span the requested range",
+                        requested=(start, end),
+                        covered=(
+                            min(f for f, _ in short.values()),
+                            max(t for _, t in short.values()),
+                        ),
+                        missing_action_types=frozenset(short),
                     )
                 )
         return found
@@ -216,7 +272,7 @@ class CorporateActionCoverageService:
         start: date,
         end: date,
         market: str = "TWSE",
-        required: frozenset[CorporateActionType] = PRICE_AFFECTING,
+        required: frozenset[CorporateActionType] | None = None,
     ) -> None:
         """Raise unless every symbol may legitimately be adjusted over the range.
 
@@ -247,7 +303,9 @@ class CorporateActionCoverageService:
 
 __all__ = [
     "PRICE_AFFECTING",
+    "REQUIRED_FOR_ADJUSTMENT",
     "AdjustmentNotPermitted",
     "CorporateActionCoverageService",
     "CoverageGap",
+    "required_action_types",
 ]

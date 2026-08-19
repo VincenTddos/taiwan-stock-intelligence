@@ -422,14 +422,16 @@ Phase 3（Quant Engine）需要的 canonical 資料，Phase 2 是否備妥：
 | `InstitutionalFlow` | ✅ buy/sell/net 三者齊全，籌碼因子可用 |
 | `StockMaster` | ✅ SCD2，產業分類可做產業內標準化 |
 | `TradingCalendar` | ✅ 因子視窗以交易日計算，不以日曆日 |
-| `CorporateAction` | ⚠️ **schema + bitemporal 查詢完成，但沒有來源在填**。技術指標需要還原價，這是 Phase 3 的第一個前置 |
+| `CorporateAction` | ⚠️ 三個 TWSE 來源已接上，現金股利與減資有 2019 起的歷史；**配股與現增只有今天以後**，因此歷史還原仍被守門擋住（§18.3 第 6 項） |
 | `DataAvailability` | ✅ `as_of` 可見性服務完成，Phase 6 回測直接消費 |
 | Feature Contract | ⏳ Phase 3 建立（依你的指示，Phase 3 先建 Feature/Factor Contract 與時序慣例） |
 
 ### Phase 3 開始前的三個前置
 
 1. **解除 L1** —— 沒有真實資料量，因子的 IC 檢定沒有意義
-2. **Corporate actions 來源** —— 沒有還原價，MA、動能、報酬序列全部會在除權息日出現假跳空
+2. ~~**Corporate actions 來源**~~ —— 來源已接上、因子已可計算並與交易所對帳（§18）。
+   剩下的不是實作而是**取捨**：TWSE 沒有可拆解的歷史配股來源，所以完整的歷史還原
+   仍缺一個來源（MOPS 逐年，或商業資料源）。在補上之前守門會拒絕歷史區間，這是對的
 3. **設定 GitHub remote 並 push** —— CI 已經寫好但一次都沒真的跑過。§13 第 6 項就是
    這個空窗期漏掉的：一個 CI 一跑就會炸的缺陷，安靜地活過了整個 Phase 1。
    我需要 owner 才能組出完整 URL（見 §16）
@@ -450,7 +452,7 @@ Phase 3（Quant Engine）需要的 canonical 資料，Phase 2 是否備妥：
 | 8 | Daily prices | ✅ | 唯一鍵 `(symbol, trading_date, source)` |
 | 9 | Index data | ✅ | TAIEX 等；`index_type` 預留產業指數 |
 | 10 | Institutional flow | ✅ | 7 種投資人 × buy/sell/net |
-| 11 | Corporate actions | ⚠️ | schema + bitemporal 查詢完成；**無來源** |
+| 11 | Corporate actions | ✅ | 三個 TWSE 來源接上 ingestion job，7,886 筆實際寫入；還原因子與對帳完成（§18） |
 | 12 | Data validation | ✅ | completeness / validity / continuity |
 | 13 | Quarantine | ✅ | 保留原始 payload，不靜默丟棄 |
 | 14 | Data provenance | ✅ | `raw_ingestions` + 每列 `ingestion_id` |
@@ -480,7 +482,9 @@ Phase 3（Quant Engine）需要的 canonical 資料，Phase 2 是否備妥：
 需要你的：
 
 1. **在有網路的機器執行 §11**，把 `data-operations` 輸出給我，我補上實測覆蓋數字
-2. **Corporate actions 來源的決定** —— TWSE `t187ap45_L`（股利分派）是已驗證的 OpenAPI 端點，是最省事的起點；MOPS 涵蓋更全但脆弱
+2. ~~**Corporate actions 來源的決定**~~ —— 三個 TWSE 端點已實作並實際跑通（§18）。
+   **仍需你決定的是歷史配股來源**：MOPS `t187ap45_L` 逐年（附帶董事會決議日期，
+   也就是真正的知曉時間）、商業資料源、或接受只有現金股利的還原（不建議）
 3. 確認後再下 Phase 3 指令
 
 ---
@@ -635,3 +639,131 @@ CI 回答「這份 repo 是不是完整的」。這兩個問題的答案，今�
 整套 stack（postgres + redis + migrate + api + worker + beat + web）
 在一台乾淨的機器上從版控內容建起來、啟動、並通過健康驗證。
 這是 `v0.2.1-phase2` 標記的狀態。
+
+---
+
+## 18. Corporate actions, wired up （2026-08-19）
+
+§14 列的三個 Phase 3 前置，第二項「Corporate actions 來源」到這一段為止已完成 ——
+**但完成的方式不是「可以還原了」，而是「現在知道還原不了什麼，以及為什麼」。**
+後者比前者有用，下面把它說清楚。
+
+### 18.1 補上的東西
+
+Phase 2 結束時，corporate actions 有 schema、有 coverage 表、有守門邏輯、
+有三個 parser，**唯獨沒有把它們接起來的東西**：沒有 ingestion job，
+沒有任何一行程式會算還原因子。這一段補的就是那條線。
+
+| 新增 | 說明 |
+|------|------|
+| `ingest_corporate_actions` | 一個來源、抓取 → pipeline → **同時寫入 coverage**。行為與其他 dataset 一致（provenance、quarantine、冪等 upsert） |
+| `AdjustmentService` | 單日因子、逐列因子分攤、累積因子、`adjusted_close` 寫回。守門在任何算術之前 |
+| `ReplayFetcher` | replay 改成替換 **transport** 而非替換 provider。錄製的回應因此走的是正式 parser 與正式 `supported_actions` |
+| CLI + Make | `ingest corporate-actions` / `ingest adjust`；`make ingest-corporate-actions` / `make adjust` |
+| Migration 0006 | 六張表的 `source` 從 20 放寬到 30 字元 |
+| ADR-024 / ADR-025 | 因子公式與對帳；coverage 改為逐 action type 判定 |
+
+### 18.2 實測（live，2026-08-19）
+
+```
+TWSE_EXRIGHT_RESULTS     7,575 筆現金股利   2019-01-16 → 2026-08-20   973 筆隔離
+TWSE_CAPITAL_REDUCTION     175 筆減資       2019-01-02 → 2026-08-24     8 次請求
+TWSE_EXRIGHT_FORECAST      130 筆（現金/配股/現增）  coverage 僅 2026-08-19 起
+coverage                 1,095 檔 × 3 個來源
+```
+
+三個來源全部實際打過 TWSE，資料進了資料庫。
+
+### 18.3 這一輪抓到的六件事
+
+前五件是缺陷，第六件不是缺陷而是**這個平台目前的真實狀態**。
+
+**1. replay 模式對 corporate actions 從來沒有生效。**
+`registry.get_corporate_actions` 完全沒有看 `PROVIDER_MODE`，一律建 live provider。
+測試套件以為自己在 replay，這個 dataset 上其實會真的發 HTTP 請求 ——
+而且**兩種情況下測試都會過**，所以它不會自己浮出來。修法是把 replay 下移成
+transport（`ReplayFetcher`），並加一個斷言 `raw_ingestions.transport` 全為 `REPLAY` 的測試。
+
+**2. registry 的設定對 corporate actions provider 完全沒有作用。**
+provider 是 `impl()` 空參數建出來的，`data_sources` 的 timeout、retry、rate limit
+一項都沒傳進去。「改 timeout 是改一列資料而不是改一次部署」這個 registry 的核心賣點，
+在這個 dataset 上是空話。第一次 live 執行就付了代價（見第 3 項）。
+
+**3. 減資端點在長區間會直接不回應。** 實測：年初至今 2.9 秒、整年 30.6 秒、
+八年 90 秒內完全沒有回應。20 秒的預設 timeout 重試三次後放棄，
+**看起來像來源掛了，其實是我們問得太貪心。**
+修法是 provider 宣告 `max_query_days`，job 依此切段 —— 每段仍各自寫一列
+`raw_ingestions`，因為一個 response hash 必須對應一個真的 response。
+切段後八次請求全部在 78–344 毫秒內完成。
+
+**4. coverage 的 union 算錯了，而且錯在最危險的方向。**
+`gaps()` 分別取 `min(covered_from)`、`max(covered_to)` 與 action types 的聯集。
+用 TWSE 的真實來源代進去：結果表涵蓋 2019 起的現金股利，預告表涵蓋**今天起**的
+配股與現增 —— 聯集讀起來是「2019 至今、全部類型」，守門直接放行。
+**沒有任何一個來源看過 2019 年的配股。** 這正是 coverage 表要防的假信心，
+被讀取它的算術重新引進來。改成逐 action type 判定（ADR-025）。
+
+**5. 把「尚未公告價格的未來事件」丟進 quarantine，比存起來更危險。**
+TWSE 在 TWTAUU 裡列出 1563 巧新 2026-09-07 的現金減資，所有價格欄位都是 `-`，
+因為那天還沒到。第一版 validator 判 FATAL 送進隔離區 —— 於是這個事件
+**不在 `corporate_actions` 裡**，coverage 卻說「找過了」，守門會放行，
+還原會跳過這一天。拒絕必須發生在事件看得見的地方：現在它以 `CA09` 存進去，
+由 `AdjustmentService` 在讀到它時擋掉整檔股票。
+
+**6. 歷史還原目前做不到，而系統正確地說出了這件事。**
+
+```
+$ python -m scripts.ingest adjust --from 2019-01-01 --to 2026-08-14 --symbol 2330
+1 of 1 symbols cannot be adjusted over 2019-01-01 → 2026-08-14:
+  2330: coverage does not span the requested range
+        (requested 2019-01-01 → 2026-08-14, covered 2026-08-19 → 2026-12-31);
+        uncovered action types: ['RIGHTS_ISSUE', 'STOCK_DIVIDEND']
+```
+
+原因不在程式：**TWSE 沒有公開可拆解的歷史配股來源。**
+唯一會把事件拆成現金/配股/現增的端點是預告表，而它沒有歷史；
+結果表有歷史，但它的「權值+息值」是一個合併的價格數字，拆不開（ADR-022）。
+所以現金股利的歷史還原是可行的，完整還原不行。
+
+這是一個**待你決定的取捨**，不是一個待修的 bug：
+
+| 選項 | 代價 |
+|------|------|
+| MOPS `t187ap45_L`（股利分派）逐年抓 | 需要爬 MOPS；但同時能拿到董事會決議日期，也就是真正的知曉時間 |
+| 商業資料源 | 花錢，換完整度與 SLA |
+| 只用現金股利還原，接受配股缺口 | **不建議**：台股配股常見，缺口會直接進動能因子 |
+
+在來源補上之前，守門會持續拒絕歷史區間 —— 這是它應有的行為。
+
+### 18.4 因子是被驗證過的，不是被宣稱的
+
+`AdjustmentService` 用交易所自己的參考價公式算因子，再拿交易所自己公布的
+除權息前收盤價／參考價回頭對帳。錄製的 2026 payload 中六個事件實測殘差：
+
+```
+2330    2026-03-17  cash 6.000035  computed 0.99674795  published 0.99674255   0.05 bps
+00939   2026-01-02  cash 0.072000  computed 0.99510204  published 0.99455782   5.47 bps
+00953B  2026-01-06  cash 0.061000  computed 0.99375000  published 0.99282787   9.29 bps
+```
+
+殘差全部來自 TWSE 把參考價截到小數兩位，容忍值 30 bps 就是這樣定出來的 ——
+量出來的，不是猜的。另有一個測試餵進錯誤的股利，斷言對帳**會失敗**：
+一個不可能失敗的檢查比沒有檢查更糟，這一點在 §17 已經付過學費。
+
+### 18.5 順手修掉的三件事
+
+| 問題 | 影響 |
+|------|------|
+| `beat` 容器一直在 crash-loop | `celerybeat-schedule` 寫在唯讀的工作目錄，`Permission denied`。**兩天沒有人發現**，因為還沒有任何排程任務，一個從沒啟動的 beat 和一個沒事做的 beat 長得一樣 |
+| `asgi-lifespan` 沒有寫進 `[dev]` | `pip install -e ".[dev]" && pytest` —— CONTRIBUTING 教的指令 —— 在乾淨機器上第一步 import 就失敗。CI 與 clone-check 各自私下補裝，所以誰都沒發現 |
+| `mypy` 只檢查 `app/` | `scripts/` 沒進型別檢查，而那裡放的是實際會被人執行的 CLI。納入後立刻抓到一個既有錯誤 |
+
+### 18.6 現在的狀態
+
+- 測試 **293 passed**（新增 39），覆蓋率 86.75%（門檻 80）
+- `ruff` / `ruff format` / `mypy --strict`（含 `scripts/`）全綠
+- migration up → down → up 通過，`alembic check` 無漂移
+- 三個來源實際打過 TWSE，7,886 筆 corporate actions 落地
+
+**Phase 3 的三個前置，第二項狀態從「無來源」變成「來源已接上，歷史配股仍缺，
+且系統會據此拒絕」。** 第一項（L1 全市場回補）與第三項（CI）不受影響。

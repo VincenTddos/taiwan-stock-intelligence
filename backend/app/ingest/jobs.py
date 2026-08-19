@@ -11,7 +11,7 @@ a retry safe and a backfill restartable.
 
 from __future__ import annotations
 
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
 from sqlalchemy import func, select
@@ -23,8 +23,10 @@ from app.ingest.pipeline import IngestionOutcome, IngestionPipeline
 from app.models.market import DailyPrice, MarketStatus, StockMaster
 from app.models.ops import DataSource
 from app.providers.base import BaseMarketDataProvider
+from app.providers.corporate_actions import CorporateActionProvider
 from app.providers.registry import ProviderRegistry
 from app.services.calendar_service import TradingCalendarService
+from app.services.corporate_action_service import CorporateActionCoverageService
 from app.services.freshness_service import DataFreshnessService
 
 log = get_logger(__name__)
@@ -266,6 +268,170 @@ async def ingest_institutional_flow(
     return await IngestionPipeline(session).run(result, dataset="institutional_flow")
 
 
+# -------------------------------------------------------- corporate actions
+def _coverage_window(
+    provider: CorporateActionProvider, start: date, end: date, today: date
+) -> tuple[date, date] | None:
+    """The sub-range this source may honestly claim to have searched.
+
+    Not the range that was requested. A forward-looking table asked for 2019
+    answers, cheerfully, with nothing — and recording that as coverage of 2019
+    would convert "this endpoint cannot see the past" into "no dividends were
+    paid", which is the exact substitution the coverage table exists to prevent.
+
+    `history_starts = None` means the reach into the past is unknown, and
+    unknown is not unlimited: such a source may claim today forward and no
+    further back.
+    """
+    lower = provider.history_starts or today
+    lower = max(lower, start)
+    return (lower, end) if lower <= end else None
+
+
+async def ingest_corporate_actions(
+    session: AsyncSession,
+    registry: ProviderRegistry,
+    *,
+    start: date,
+    end: date,
+    source: str,
+    symbol: str | None = None,
+) -> dict[str, Any]:
+    """Ingest one source's corporate actions and record what it searched.
+
+    The write of the actions and the write of the coverage are one unit. Actions
+    without coverage cannot be adjusted with (`assert_adjustable` refuses), and
+    coverage without actions is a false claim — so the interesting failure is
+    the second, and it is avoided by deriving coverage from the same call that
+    produced the actions rather than from a separate pass.
+    """
+    provider = await registry.get_corporate_actions(session, source)
+    window = _coverage_window(provider, start, end, datetime.now(UTC).date())
+    pipeline = IngestionPipeline(session)
+    coverage = CorporateActionCoverageService(session)
+
+    found: dict[str, int] = {}
+    outcomes: list[IngestionOutcome] = []
+
+    for chunk_start, chunk_end in _chunks(
+        window[0] if window else start, window[1] if window else end, provider.max_query_days
+    ):
+        try:
+            result = await provider.get_corporate_actions(
+                start=chunk_start, end=chunk_end, symbol=symbol
+            )
+            await _mark_source(session, source, ok=True)
+        except Exception as exc:
+            await _mark_source(session, source, ok=False, error=str(exc))
+            raise
+
+        # The natural key is (symbol, action_type, ex_date, source), and `source`
+        # here is the provider — not the exchange. Three TWSE endpoints see
+        # different action types; collapsing them to 'TWSE' would make the
+        # forecast table and the results table overwrite each other's rows.
+        for rec in result.records:
+            rec["source"] = provider.code
+            found[rec["symbol"]] = found.get(rec["symbol"], 0) + 1
+
+        # Ex-dates are trading days by construction, but the forecast table runs
+        # ahead of the published calendar, and a calendar that has not been built
+        # that far forward is not evidence that the market is shut.
+        outcomes.append(
+            await pipeline.run(result, dataset="corporate_actions", enforce_calendar=False)
+        )
+
+    outcome = _merge(outcomes, source=provider.code)
+
+    covered_symbols = 0
+    if window is not None:
+        # Every symbol the endpoint searched, not only the ones it found
+        # something for. A symbol that paid no dividend and a symbol nobody
+        # looked at are the same empty set in `corporate_actions`; this is where
+        # they stop being the same.
+        universe = [symbol] if symbol else await _known_symbols(session, provider.market)
+        for sym in universe:
+            await coverage.record(
+                symbol=sym,
+                market=provider.market,
+                source=provider.code,
+                covered_from=window[0],
+                covered_to=window[1],
+                action_types=provider.supported_actions,
+                actions_found=found.get(sym, 0),
+                ingestion_id=outcome.ingestion_id,
+            )
+        covered_symbols = len(universe)
+    await session.flush()
+
+    log.info(
+        "corporate_actions_ingested",
+        source=provider.code,
+        requested=f"{start}→{end}",
+        covered=f"{window[0]}→{window[1]}" if window else None,
+        records=outcome.records_written,
+        quarantined=outcome.records_quarantined,
+        symbols=covered_symbols,
+    )
+    return {
+        "source": provider.code,
+        "requested": [start, end],
+        "covered": list(window) if window else None,
+        "coverage_symbols": covered_symbols,
+        "symbols_with_actions": len(found),
+        "supported_actions": sorted(str(a) for a in provider.supported_actions),
+        "outcome": outcome.as_dict(),
+    }
+
+
+def _chunks(start: date, end: date, max_days: int | None) -> list[tuple[date, date]]:
+    """Split a range into spans the source will actually answer."""
+    if max_days is None or (end - start).days < max_days:
+        return [(start, end)]
+    out: list[tuple[date, date]] = []
+    cursor = start
+    while cursor <= end:
+        stop = min(cursor + timedelta(days=max_days - 1), end)
+        out.append((cursor, stop))
+        cursor = stop + timedelta(days=1)
+    return out
+
+
+def _merge(outcomes: list[IngestionOutcome], *, source: str) -> IngestionOutcome:
+    """One outcome for a job that may have taken several requests.
+
+    Each chunk still writes its own `raw_ingestions` row, so provenance stays
+    one row per call; this is only the summary the caller is handed.
+    """
+    total = IngestionOutcome(dataset="corporate_actions", source=source)
+    for o in outcomes:
+        total.records_in += o.records_in
+        total.records_written += o.records_written
+        total.records_quarantined += o.records_quarantined
+        total.records_suspect += o.records_suspect
+        total.parse_errors += o.parse_errors
+        total.data_as_of = o.data_as_of or total.data_as_of
+        total.ingestion_id = o.ingestion_id or total.ingestion_id
+    total.timings_ms["requests"] = len(outcomes)
+    return total
+
+
+async def _known_symbols(session: AsyncSession, market: str) -> list[str]:
+    """Every symbol the master has ever carried, current or not.
+
+    Not just the currently listed ones. A full-market endpoint searched the
+    delisted symbols too, and they are precisely the ones a backtest must be
+    able to adjust — a universe restricted to survivors is where survivorship
+    bias comes from.
+    """
+    rows = await session.execute(
+        select(StockMaster.symbol)
+        .where(StockMaster.market == market)
+        .distinct()
+        .order_by(StockMaster.symbol)
+    )
+    return [r[0] for r in rows.all()]
+
+
 # ------------------------------------------------------------ derived state
 async def refresh_market_status(session: AsyncSession, market: str = "TWSE") -> dict[str, Any]:
     """Materialise the snapshot `/market/status` serves.
@@ -318,6 +484,7 @@ async def refresh_freshness(session: AsyncSession, market: str = "TWSE") -> list
 
 
 __all__ = [
+    "ingest_corporate_actions",
     "ingest_daily_prices",
     "ingest_index_quotes",
     "ingest_institutional_flow",

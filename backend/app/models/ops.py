@@ -139,7 +139,7 @@ class RawIngestion(Base):
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
 
-    source: Mapped[str] = mapped_column(String(20), nullable=False)
+    source: Mapped[str] = mapped_column(String(30), nullable=False)
     source_endpoint: Mapped[str] = mapped_column(String(255), nullable=False)
     dataset: Mapped[str] = mapped_column(String(50), nullable=False)
     params: Mapped[dict[str, object] | None] = mapped_column(JSONB)
@@ -194,7 +194,7 @@ class DataQuarantine(Base):
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
 
     dataset: Mapped[str] = mapped_column(String(50), nullable=False)
-    source: Mapped[str] = mapped_column(String(20), nullable=False)
+    source: Mapped[str] = mapped_column(String(30), nullable=False)
     symbol: Mapped[str | None] = mapped_column(String(20))
     trading_date: Mapped[date | None] = mapped_column(Date)
 
@@ -283,7 +283,7 @@ class BackfillCheckpoint(Base):
 
     job_key: Mapped[str] = mapped_column(String(120), nullable=False, unique=True)
     dataset: Mapped[str] = mapped_column(String(50), nullable=False)
-    source: Mapped[str] = mapped_column(String(20), nullable=False)
+    source: Mapped[str] = mapped_column(String(30), nullable=False)
     scope: Mapped[str] = mapped_column(String(40), nullable=False, default="ALL")
 
     range_start: Mapped[date] = mapped_column(Date, nullable=False)
@@ -340,7 +340,7 @@ class IngestionMetric(Base):
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
 
     dataset: Mapped[str] = mapped_column(String(50), nullable=False)
-    source: Mapped[str] = mapped_column(String(20), nullable=False)
+    source: Mapped[str] = mapped_column(String(30), nullable=False)
     trading_date: Mapped[date | None] = mapped_column(Date)
 
     provider_ms: Mapped[int | None] = mapped_column(Integer)

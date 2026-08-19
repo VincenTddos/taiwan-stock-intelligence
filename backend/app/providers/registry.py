@@ -12,6 +12,7 @@ of every number depend on the weather.
 
 from __future__ import annotations
 
+from dataclasses import replace
 from enum import StrEnum
 
 import redis.asyncio as aioredis
@@ -23,8 +24,9 @@ from app.core.logging import get_logger
 from app.models.ops import DataSource, SourceStatus
 from app.providers.base import BaseMarketDataProvider, ProviderError, ProviderErrorKind
 from app.providers.corporate_actions import CorporateActionProvider
+from app.providers.http import HttpFetcher
 from app.providers.rate_limiter import RateLimitConfig, get_rate_limiter
-from app.providers.replay import ReplayProvider
+from app.providers.replay import ReplayProvider, replay_corporate_action_provider
 from app.providers.twse import TWSEProvider
 from app.providers.twse_corporate_actions import (
     TWSEForecastProvider,
@@ -185,7 +187,49 @@ class ProviderRegistry:
                 f"{sorted(CORPORATE_ACTION_PROVIDER_TYPES) or 'none yet'})",
                 source=code,
             )
-        return impl()
+
+        # Checked here and not only in `build`: this lookup used to return a
+        # live provider whatever the mode said, so a replayed run reached the
+        # exchange for corporate actions while reporting `transport=REPLAY`
+        # everywhere else. Mode is a property of the application, not of one
+        # dataset.
+        if self.mode is ProviderMode.REPLAY:
+            if self.settings.APP_ENV is AppEnv.PRODUCTION:
+                raise ProviderError(
+                    ProviderErrorKind.CONFIG_ERROR,
+                    "PROVIDER_MODE=replay is not permitted in production",
+                    source=code,
+                )
+            log.info("provider_replay_mode", source=code, dataset="corporate_actions")
+            return replay_corporate_action_provider(
+                row.provider_type, CORPORATE_ACTION_PROVIDER_TYPES, settings=self.settings
+            )
+
+        # The transport is built here, from the row. Constructing `impl()` bare
+        # let each provider fall back to its own hard-coded timeout and retry
+        # count, so the registry's whole purpose — that a timeout is a row
+        # update rather than a deploy — did not apply to this dataset. It
+        # mattered the first time it was run live: the capital reduction
+        # endpoint needs far longer than the 20 s default.
+        return impl(
+            fetcher=HttpFetcher(
+                source=row.code,
+                base_url=row.base_url,
+                rate_limit=self._corporate_action_rate_limit(row),
+                limiter=self.limiter,
+                timeout_seconds=float(row.timeout_seconds),
+                max_retries=row.max_retries,
+            )
+        )
+
+    def _corporate_action_rate_limit(self, row: DataSource) -> RateLimitConfig:
+        """One budget per exchange, not one per endpoint.
+
+        Corporate action backfill runs alongside daily ingestion, and a budget
+        per endpoint would triple the rate TWSE sees from us at exactly the
+        moment we are busiest. The limits themselves still come from the row.
+        """
+        return replace(self._rate_limit_for(row), source=row.market or row.code)
 
     async def active_sources(self, session: AsyncSession) -> list[DataSource]:
         stmt = (

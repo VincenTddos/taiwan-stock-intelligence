@@ -290,8 +290,8 @@ async def measure_coverage(session: AsyncSession) -> dict[str, Any]:
         await session.execute(
             select(RawIngestion.transport, func.count()).group_by(RawIngestion.transport)
         )
-    ).all()
-    cov["raw_ingestions"]["by_transport"] = dict(transports)
+    ).tuples()
+    cov["raw_ingestions"]["by_transport"] = dict(transports.all())
 
     # Trading days in range that have no price row at all. This is the gap
     # measurement that matters for a backtest: a missing session is not a zero,

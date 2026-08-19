@@ -175,7 +175,24 @@ services:
     container_name: twquant-beat
     environment:
       <<: [*postgres-env, *redis-env, *app-env]
-    command: ["celery", "-A", "app.workers.celery_app", "beat", "-l", "info"]
+    # `--schedule` is not a preference. Beat keeps its last-run state in a
+    # shelve file, defaulting to `celerybeat-schedule` in the working
+    # directory, and the image runs as a non-root user who cannot write to
+    # `/app`. Without this the container crash-loops on
+    # `_gdbm.error: [Errno 13] Permission denied` — which it did, unnoticed,
+    # because nothing scheduled had been written yet, so a beat that never
+    # started looked exactly like a beat with nothing to do.
+    command:
+      [
+        "celery",
+        "-A",
+        "app.workers.celery_app",
+        "beat",
+        "-l",
+        "info",
+        "--schedule",
+        "/tmp/celerybeat-schedule",
+      ]
     depends_on:
       redis:
         condition: service_healthy

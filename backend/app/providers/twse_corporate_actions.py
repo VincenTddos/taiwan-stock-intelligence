@@ -39,7 +39,7 @@ from app.providers.base import (
     ProviderResult,
 )
 from app.providers.corporate_actions import CorporateActionProvider
-from app.providers.http import HttpFetcher
+from app.providers.http import HttpFetcher, JsonFetcher
 from app.providers.normalize import ParseError, clean, parse_decimal, parse_roc_date, parse_symbol
 from app.providers.rate_limiter import RateLimitConfig, RateLimiter, get_rate_limiter
 
@@ -323,7 +323,7 @@ class _TWSEBase(CorporateActionProvider):
         rate_limit: RateLimitConfig | None = None,
         timeout_seconds: float = 20.0,
         max_retries: int = 3,
-        fetcher: HttpFetcher | None = None,
+        fetcher: JsonFetcher | None = None,
     ) -> None:
         # Same limiter and the same source key as the price provider, so the
         # exchange sees one budget for this application rather than one per
@@ -333,19 +333,27 @@ class _TWSEBase(CorporateActionProvider):
         cfg = rate_limit or RateLimitConfig(
             source=MARKET, requests_per_minute=60, max_concurrency=2, min_interval_ms=350
         )
-        self._fetcher = fetcher or HttpFetcher(
-            source=MARKET,
-            base_url=OPENAPI,
-            rate_limit=cfg,
-            limiter=limiter or get_rate_limiter(),
-            timeout_seconds=timeout_seconds,
-            max_retries=max_retries,
+        super().__init__(
+            fetcher=fetcher
+            or HttpFetcher(
+                # Provenance names the endpoint family, not the exchange: three
+                # sources write to `corporate_actions`, and a `raw_ingestions`
+                # row saying only 'TWSE' could not say which one produced a
+                # record. The rate limit above stays keyed on the exchange,
+                # which is the thing with a budget.
+                source=self.code,
+                base_url=OPENAPI,
+                rate_limit=cfg,
+                limiter=limiter or get_rate_limiter(),
+                timeout_seconds=timeout_seconds,
+                max_retries=max_retries,
+            )
         )
 
     async def health(self) -> ProviderHealth:
         started = datetime.now(UTC)
         try:
-            await self._fetcher.fetch_json(self.probe_endpoint, dataset=self.dataset)
+            await self.fetcher.fetch_json(self.probe_endpoint, dataset=self.dataset)
         except ProviderError as exc:
             return ProviderHealth(
                 source=self.code, reachable=False, error=str(exc), checked_at=started
@@ -358,7 +366,7 @@ class _TWSEBase(CorporateActionProvider):
         )
 
     async def aclose(self) -> None:
-        await self._fetcher.aclose()
+        await self.fetcher.aclose()
 
     @staticmethod
     def _within(records: list[dict[str, Any]], start: date, end: date) -> list[dict[str, Any]]:
@@ -386,7 +394,7 @@ class TWSEForecastProvider(_TWSEBase):
     async def get_corporate_actions(
         self, *, start: date, end: date, symbol: str | None = None
     ) -> ProviderResult:
-        payload, meta = await self._fetcher.fetch_json(FORECAST_ENDPOINT, dataset=self.dataset)
+        payload, meta = await self.fetcher.fetch_json(FORECAST_ENDPOINT, dataset=self.dataset)
         records, errors = parse_forecast(payload)
         meta.dataset = self.dataset
         meta.source_endpoint = FORECAST_ENDPOINT
@@ -411,7 +419,7 @@ class TWSEResultsProvider(_TWSEBase):
     async def get_corporate_actions(
         self, *, start: date, end: date, symbol: str | None = None
     ) -> ProviderResult:
-        payload, meta = await self._fetcher.fetch_json(
+        payload, meta = await self.fetcher.fetch_json(
             RESULTS_ENDPOINT,
             dataset=self.dataset,
             params={
@@ -440,11 +448,15 @@ class TWSEReductionProvider(_TWSEBase):
     transport = Transport.LIVE
     supported_actions = frozenset({CorporateActionType.CAPITAL_REDUCTION})
     history_starts = date(2019, 1, 1)
+    # Measured on 2026-08-19: year-to-date 2.9 s, one full year 30.6 s, eight
+    # years no response at all inside 90 s. A year at a time is the largest
+    # request that reliably answers.
+    max_query_days = 366
 
     async def get_corporate_actions(
         self, *, start: date, end: date, symbol: str | None = None
     ) -> ProviderResult:
-        payload, meta = await self._fetcher.fetch_json(
+        payload, meta = await self.fetcher.fetch_json(
             REDUCTION_ENDPOINT,
             dataset=self.dataset,
             params={
