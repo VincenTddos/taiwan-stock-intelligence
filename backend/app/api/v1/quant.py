@@ -130,6 +130,10 @@ async def factor_catalogue(session: SessionDep) -> Envelope[list[dict[str, Any]]
             {
                 **spec.as_dict(),
                 "verdict": record[1] if record else None,
+                # Stated explicitly rather than left for the caller to derive
+                # from the verdict. A consumer that guessed would guess
+                # permissively, and the permissive guess is the dangerous one.
+                "production_eligible": bool(record and record[1] == "PASS"),
                 "metrics": record[2] if record else None,
                 "evaluated_from": record[3] if record else None,
                 "evaluated_to": record[4] if record else None,

@@ -27,6 +27,7 @@ class Capability(StrEnum):
     MARKET_INDEX = "MARKET_INDEX"
     INSTITUTIONAL_FLOW = "INSTITUTIONAL_FLOW"
     CORPORATE_ACTIONS = "CORPORATE_ACTIONS"
+    NEWS = "NEWS"
 
 
 class ProviderErrorKind(StrEnum):

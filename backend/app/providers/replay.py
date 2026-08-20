@@ -32,7 +32,7 @@ from typing import Any
 from app.core.config import AppEnv, Settings, get_settings
 from app.core.logging import get_logger
 from app.models.ops import Transport
-from app.providers import twse
+from app.providers import twse, twse_news
 from app.providers import twse_corporate_actions as twse_ca
 from app.providers.base import (
     BaseMarketDataProvider,
@@ -43,6 +43,7 @@ from app.providers.base import (
     SourceMetadata,
 )
 from app.providers.corporate_actions import CorporateActionProvider
+from app.providers.news import NewsProvider
 from app.providers.normalize import parse_roc_date
 
 log = get_logger(__name__)
@@ -335,6 +336,34 @@ class ReplayFetcher:
         return None
 
 
+# ------------------------------------------------------------------------ news
+#: Endpoint URL -> recording, as for corporate actions. Both news endpoints
+#: share the dataset name `news`; what distinguishes them is which was called.
+NEWS_RECORDINGS: dict[str, str] = {
+    twse_news.MATERIAL_ENDPOINT: "t187ap04_L_1150819.json",
+    twse_news.NEWS_ENDPOINT: "news_list_1150819.json",
+}
+
+
+def replay_news_provider(
+    provider_type: str,
+    implementations: dict[str, type[NewsProvider]],
+    *,
+    settings: Settings | None = None,
+    fixture_dir: Path | None = None,
+) -> NewsProvider:
+    """Build the real news provider on a replayed transport."""
+    impl = implementations[provider_type]
+    return impl(
+        fetcher=ReplayFetcher(
+            source=impl.code,
+            recordings=NEWS_RECORDINGS,
+            fixture_dir=fixture_dir,
+            settings=settings,
+        )
+    )
+
+
 def replay_corporate_action_provider(
     provider_type: str,
     implementations: dict[str, type[CorporateActionProvider]],
@@ -357,9 +386,11 @@ def replay_corporate_action_provider(
 __all__ = [
     "CORPORATE_ACTION_RECORDINGS",
     "FIXTURES",
+    "NEWS_RECORDINGS",
     "REPLAY_HISTORY_MONTH",
     "REPLAY_HISTORY_SYMBOL",
     "ReplayFetcher",
     "ReplayProvider",
     "replay_corporate_action_provider",
+    "replay_news_provider",
 ]

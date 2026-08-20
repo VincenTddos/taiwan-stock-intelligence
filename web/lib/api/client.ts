@@ -249,8 +249,16 @@ export interface FactorSpec {
   winsorize: number[] | null;
   standardize: string;
   neutralize: string[];
+  /** Which piece of work supplies the inputs, when the factor cannot compute. */
+  provided_by: string;
   /** Null until the factor has been graded over a window. */
   verdict: "PASS" | "RESEARCH_ONLY" | "INSUFFICIENT_DATA" | "NOT_COMPUTABLE" | null;
+  /**
+   * Whether a composite score may use this factor. Sent by the backend rather
+   * than derived here: a client that guessed would guess permissively, and the
+   * permissive guess is the one that puts an unvalidated factor into a score.
+   */
+  production_eligible: boolean;
   metrics: FactorMetrics | null;
   evaluated_from: string | null;
   evaluated_to: string | null;

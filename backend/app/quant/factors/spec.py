@@ -69,6 +69,12 @@ class FactorSpec:
     standardize: Standardisation = Standardisation.ZSCORE
     neutralize: tuple[Neutralisation, ...] = ()
 
+    #: Which piece of work supplies this factor's inputs. Empty when the panel
+    #: already carries them. Named rather than inferred, because "missing
+    #: eps_ttm" tells a reader what is absent and not who is expected to produce
+    #: it — and the second question is the one that gets asked.
+    provided_by: str = ""
+
     def __post_init__(self) -> None:
         if self.direction not in (1, -1):
             raise ValueError(f"{self.name}: direction must be +1 or -1")
@@ -101,6 +107,7 @@ class FactorSpec:
             "winsorize": list(self.winsorize) if self.winsorize else None,
             "standardize": str(self.standardize),
             "neutralize": [str(n) for n in self.neutralize],
+            "provided_by": self.provided_by,
         }
 
 

@@ -51,6 +51,17 @@ class Verdict(StrEnum):
     INSUFFICIENT_DATA = "INSUFFICIENT_DATA"
     NOT_COMPUTABLE = "NOT_COMPUTABLE"
 
+    @property
+    def production_eligible(self) -> bool:
+        """Whether a composite score may use this factor.
+
+        Only `PASS`. Stated as a property rather than left as a comparison
+        somewhere, because it is the one question a consumer of a factor has to
+        answer and the wrong default — treating an unmeasured factor as usable —
+        is both easy to write and invisible in the result.
+        """
+        return self is Verdict.PASS
+
 
 @dataclass(slots=True)
 class FactorValidity:
@@ -79,6 +90,7 @@ class FactorValidity:
         return {
             "factor": self.factor,
             "verdict": str(self.verdict),
+            "production_eligible": self.verdict.production_eligible,
             "dates": self.dates,
             "mean_symbols": round(self.mean_symbols, 2),
             "ic": _round(self.ic),

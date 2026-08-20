@@ -133,7 +133,7 @@ clone-check: ## Clone fresh, install fresh, typecheck — what CI actually does
 		tail -1 mypy.log | sed 's/^/  /' && \
 		PYTHONPATH=/tmp/twquant-clonecheck/backend python -c \
 		"from app.main import create_app; from app.db.base import Base; \
-		 import app.models.market, app.models.ops, app.models.user, app.models.platform, app.models.quant; \
+		 import app.models.market, app.models.ops, app.models.user, app.models.platform, app.models.quant, app.models.news; \
 		 assert create_app(); print(f'  clean clone imports — {len(Base.metadata.tables)} tables')"
 	@rm -rf /tmp/twquant-clonecheck
 
@@ -149,8 +149,11 @@ verify: ## Probe a running stack and print a health summary
 	@bash scripts/verify_stack.sh
 
 # ---------------------------------------------------------------- ingestion
-.PHONY: seed-sources ingest-calendar ingest-daily ingest-all backfill \
+.PHONY: seed-sources seed-news-sources ingest-calendar ingest-daily ingest-all backfill \
 	ingest-corporate-actions adjust quant-compute quant-backfill quant-validate
+seed-news-sources: ## Seed the news source registry (permission, licence, credibility)
+	cd $(BACKEND) && . .venv/bin/activate && python -m scripts.seed_news_sources
+
 seed-sources: ## Seed the data source registry and freshness contracts
 	cd $(BACKEND) && . .venv/bin/activate && python -m scripts.seed_sources
 

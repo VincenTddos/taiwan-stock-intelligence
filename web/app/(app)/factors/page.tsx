@@ -80,14 +80,26 @@ function FactorRow({ factor }: { factor: FactorSpec }) {
         </span>
         <span className="tabular text-xs text-fg-muted">{metric(metrics?.ic)}</span>
         <span className="tabular text-xs text-fg-muted">{metric(metrics?.ic_ir)}</span>
-        <span className="tabular text-xs text-fg-subtle">
-          {factor.direction > 0 ? "higher better" : "lower better"}
+        <span
+          className={cn(
+            "text-xs font-semibold tracking-wider",
+            factor.production_eligible ? "text-ok" : "text-fg-subtle",
+          )}
+        >
+          {factor.production_eligible ? "PRODUCTION" : "RESEARCH"}
         </span>
       </button>
 
       {open ? (
         <div className="space-y-2 bg-bg-subtle/40 px-4 py-3 text-xs">
           <p className="text-fg-subtle">{verdict.note}</p>
+          {!factor.production_eligible ? (
+            <p className="text-warn">
+              Not eligible for any composite score. Only a factor that has met every
+              threshold may contribute to one — an unmeasured factor treated as usable is
+              noise with a plausible story attached.
+            </p>
+          ) : null}
           <div className="grid gap-x-8 gap-y-1 sm:grid-cols-2">
             <Detail label="formula" value={factor.formula} mono />
             <Detail label="inputs" value={factor.inputs.join(", ")} mono />
@@ -101,6 +113,13 @@ function FactorRow({ factor }: { factor: FactorSpec }) {
               label="neutralise"
               value={factor.neutralize.length ? factor.neutralize.join(", ") : "none"}
             />
+            <Detail
+              label="direction"
+              value={factor.direction > 0 ? "higher is better" : "lower is better"}
+            />
+            {factor.provided_by ? (
+              <Detail label="waiting on" value={factor.provided_by} />
+            ) : null}
           </div>
 
           {metrics?.missing_inputs?.length ? (

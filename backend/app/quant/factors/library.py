@@ -73,6 +73,17 @@ def _unavailable(column: str) -> object:
     return compute
 
 
+#: Which phase supplies the inputs for each category that cannot compute yet.
+#: Stated per category because the answer is the same for every factor in one
+#: and different between them — and "waiting on Phase 4" is a schedule, which is
+#: what somebody looking at an empty column actually wants to know.
+PROVIDED_BY: dict[C, str] = {
+    C.SENTIMENT: "Phase 4 news sentiment analysis",
+    C.NEWS: "Phase 4 news ingestion and event classification",
+    C.AI_EXPOSURE: "Phase 7 supply chain graph (ai_beta needs Phase 5's AI basket)",
+}
+
+
 def build_registry() -> FactorRegistry:
     registry = FactorRegistry()
 
@@ -89,6 +100,7 @@ def build_registry() -> FactorRegistry:
         standardize: Standardisation = Standardisation.ZSCORE,
         neutralize: tuple[Neutralisation, ...] = (Neutralisation.SECTOR,),
         winsorize: tuple[float, float] | None = (0.01, 0.99),
+        provided_by: str = "",
     ) -> None:
         registry.add(
             FactorSpec(
@@ -104,6 +116,7 @@ def build_registry() -> FactorRegistry:
                 standardize=standardize,
                 neutralize=neutralize,
                 winsorize=winsorize,
+                provided_by=provided_by,
             )
         )
 
@@ -273,6 +286,7 @@ def build_registry() -> FactorRegistry:
         min_periods=1,
         direction=-1,
         neutralize=(),
+        provided_by="a free-float source; TWSE publishes shares in issue, not float",
     )
 
     # ---------------------------------------------------------------- value
@@ -293,6 +307,7 @@ def build_registry() -> FactorRegistry:
             _unavailable(column),
             lookback_days=252,
             min_periods=1,
+            provided_by="Phase 2 financial statement ingestion (t187ap06/t187ap07), not yet built",
         )
 
     # --------------------------------------------------------------- growth
@@ -318,6 +333,7 @@ def build_registry() -> FactorRegistry:
             _unavailable(column),
             lookback_days=400,
             min_periods=1,
+            provided_by="Phase 2 monthly revenue ingestion (t187ap05_P), not yet built",
         )
 
     # -------------------------------------------------------------- quality
@@ -354,6 +370,7 @@ def build_registry() -> FactorRegistry:
             lookback_days=1000,
             min_periods=1,
             direction=direction,
+            provided_by="Phase 2 financial statement ingestion, not yet built",
         )
 
     # ------------------------------------------------- sentiment / news / AI
@@ -415,6 +432,7 @@ def build_registry() -> FactorRegistry:
             _unavailable(column),
             lookback_days=250,
             min_periods=1,
+            provided_by=PROVIDED_BY[category],
         )
 
     return registry
