@@ -19,6 +19,7 @@ import argparse
 import asyncio
 import sys
 from datetime import date, datetime
+from pathlib import Path
 
 from sqlalchemy import select
 
@@ -31,6 +32,7 @@ from app.providers.base import BaseMarketDataProvider, ProviderError
 from app.providers.registry import CORPORATE_ACTION_PROVIDER_TYPES, ProviderRegistry
 from app.services.adjustment_service import AdjustmentService
 from app.services.backfill_service import BackfillProgress, BackfillService
+from app.services.calendar_service import ScheduleYearMismatch
 from app.services.corporate_action_service import AdjustmentNotPermitted
 
 log = get_logger(__name__)
@@ -40,11 +42,28 @@ def _date(value: str) -> date:
     return datetime.strptime(value, "%Y-%m-%d").date()
 
 
-async def run_calendar(year: int) -> int:
+async def run_calendar(year: int, replay_dir: Path | None = None) -> int:
     settings = get_settings()
     registry = ProviderRegistry(settings)
+    provider: BaseMarketDataProvider | None = None
+    if replay_dir is not None:
+        # The holiday endpoint only serves the schedule currently published, so
+        # a past year can only be rebuilt from a verbatim recording. The raw
+        # ingestion is stamped REPLAY, never LIVE.
+        from app.providers.replay import ReplayProvider
+
+        provider = ReplayProvider(fixture_dir=replay_dir, settings=settings)
+        print(f"calendar {year}: rebuilding from recording in {replay_dir} (REPLAY)")
     async with get_sessionmaker()() as session:
-        result = await jobs.ingest_trading_calendar(session, registry, year=year)
+        try:
+            result = await jobs.ingest_trading_calendar(
+                session, registry, year=year, provider=provider
+            )
+        except ScheduleYearMismatch as exc:
+            await session.rollback()
+            await registry.aclose()
+            print(f"calendar {year}: NOT built: {exc}", file=sys.stderr)
+            return 2
         await session.commit()
     await registry.aclose()
     print(
@@ -298,6 +317,13 @@ def main() -> int:
 
     p_cal = sub.add_parser("calendar", help="build the trading calendar for a year")
     p_cal.add_argument("--year", type=int, default=date.today().year)
+    p_cal.add_argument(
+        "--replay-dir",
+        type=Path,
+        default=None,
+        help="rebuild from a verbatim recorded holiday schedule in this directory "
+        "(for years the exchange no longer publishes); stamped REPLAY",
+    )
 
     sub.add_parser("master", help="refresh the security master (SCD2)")
 
@@ -329,7 +355,7 @@ def main() -> int:
     args = parser.parse_args()
 
     if args.command == "calendar":
-        coro = run_calendar(args.year)
+        coro = run_calendar(args.year, args.replay_dir)
     elif args.command == "master":
         coro = run_master()
     elif args.command == "daily":

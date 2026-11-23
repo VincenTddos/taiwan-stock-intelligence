@@ -55,6 +55,28 @@ class CalendarNotPopulated(RuntimeError):
         )
 
 
+class ScheduleYearMismatch(RuntimeError):
+    """Raised when the published schedule contains no closure in the requested year.
+
+    The holiday endpoint serves only the schedule the exchange currently
+    publishes. Once it rolls over (measured live 2026-11-23: it already returned
+    ROC 116 / 2027), asking it for the current year yields zero in-year closures.
+    Treating that as "a year with no holidays" materialises every weekday as a
+    trading day and silently overwrites a correct calendar. No Taiwan market year
+    has zero closures, so an empty in-year set is a sourcing error, not data.
+    """
+
+    def __init__(self, requested: int, published: list[int]) -> None:
+        self.requested = requested
+        self.published = published
+        shown = ", ".join(str(y) for y in published) or "nothing"
+        super().__init__(
+            f"holiday schedule has no closure dated in {requested} "
+            f"(it covers: {shown}). Refusing to build {requested}: that would mark "
+            f"every weekday as a trading day and overwrite the existing calendar."
+        )
+
+
 class TradingCalendarService:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
@@ -143,6 +165,14 @@ class TradingCalendarService:
             if day.year != year:
                 continue
             by_date[day] = rec
+
+        if not by_date:
+            # Checked before anything is written: a re-run must never be able to
+            # downgrade a year that was built correctly earlier.
+            published = sorted(
+                {d.year for d in (r["calendar_date"] for r in closures) if isinstance(d, date)}
+            )
+            raise ScheduleYearMismatch(year, published)
 
         rows: list[dict[str, object]] = []
         cursor = date(year, 1, 1)
@@ -310,4 +340,4 @@ class TradingCalendarService:
         }
 
 
-__all__ = ["WEEKEND", "CalendarNotPopulated", "TradingCalendarService"]
+__all__ = ["WEEKEND", "CalendarNotPopulated", "ScheduleYearMismatch", "TradingCalendarService"]

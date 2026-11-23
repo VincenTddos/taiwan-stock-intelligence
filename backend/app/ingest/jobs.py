@@ -57,7 +57,12 @@ async def _mark_source(session: AsyncSession, code: str, *, ok: bool, error: str
 
 # ---------------------------------------------------------------- calendar
 async def ingest_trading_calendar(
-    session: AsyncSession, registry: ProviderRegistry, *, year: int, source: str = "TWSE"
+    session: AsyncSession,
+    registry: ProviderRegistry,
+    *,
+    year: int,
+    source: str = "TWSE",
+    provider: BaseMarketDataProvider | None = None,
 ) -> dict[str, Any]:
     """Build a full calendar year from the published closure schedule.
 
@@ -65,13 +70,21 @@ async def ingest_trading_calendar(
     quarantines records whose trading date has no calendar entry rather than
     guessing whether the market was open.
     """
-    provider = await _provider(session, registry, source)
+    # `provider` lets an operator rebuild a year from a verbatim recording once
+    # the exchange has stopped publishing it; provenance stays honest because
+    # the provider stamps its own transport (REPLAY) on the raw ingestion.
+    # A replayed recording says nothing about whether the live source is
+    # healthy, so source health is only touched for the registry's provider.
+    injected = provider is not None
+    provider = provider or await _provider(session, registry, source)
     calendar = TradingCalendarService(session)
     try:
         result = await provider.get_trading_calendar(year)
-        await _mark_source(session, source, ok=True)
+        if not injected:
+            await _mark_source(session, source, ok=True)
     except Exception as exc:
-        await _mark_source(session, source, ok=False, error=str(exc))
+        if not injected:
+            await _mark_source(session, source, ok=False, error=str(exc))
         raise
 
     pipeline = IngestionPipeline(session)
