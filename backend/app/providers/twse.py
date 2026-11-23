@@ -453,6 +453,29 @@ def parse_institutional_flow(
 
 
 # =====================================================================
+# T86's own universe selector: everything except warrants, callable bull/bear
+# contracts and convertible bonds (全部，不含權證、牛熊證、可轉債).
+#
+# This used to be "ALL", which sounds like the complete answer and is — it is
+# 92% warrants. Measured against the live endpoint for 2026-08-14:
+#
+#   selectType=ALL          15,637 securities   2.0 MB
+#   selectType=ALLBUT0999    1,330 securities   194 KB
+#
+# The 14,307 the exchange drops are, without exception, six-character codes
+# beginning 03-08; none has a row in STOCK_DAY_ALL and none is in the company
+# master. The 1,330 it keeps are exactly the securities that had a daily price
+# that day. So "ALL" stored seven rows a day for each of 14,307 instruments this
+# platform cannot price, cannot name and has no factor for — about 100,000 rows
+# per session, or roughly 200 million across the 2019-2026 backfill, against 19
+# million for the securities it can actually use.
+#
+# The exchange's selector is used rather than a code-pattern rule of our own,
+# because the exchange knows what a warrant is and a regex only knows what
+# warrants looked like on the day it was written. See ADR-030.
+T86_SELECT_TYPE = "ALLBUT0999"
+
+
 class TWSEProvider(BaseMarketDataProvider):
     code = MARKET
     market = MARKET
@@ -592,7 +615,7 @@ class TWSEProvider(BaseMarketDataProvider):
     async def get_institutional_flow(self, *, trading_date: date) -> ProviderResult:
         params = {
             "date": f"{trading_date.year:04d}{trading_date.month:02d}{trading_date.day:02d}",
-            "selectType": "ALL",
+            "selectType": T86_SELECT_TYPE,
             "response": "json",
         }
         payload, meta = await self._rwd.fetch_json(
@@ -619,6 +642,7 @@ __all__ = [
     "MARKET_INDEX_NAMES",
     "OPENAPI_BASE",
     "RWD_BASE",
+    "T86_SELECT_TYPE",
     "TWSEProvider",
     "parse_holiday_schedule",
     "parse_index_quotes",
