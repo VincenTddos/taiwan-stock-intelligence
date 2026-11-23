@@ -25,7 +25,7 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Query
 from pydantic import BaseModel, Field, field_validator
-from sqlalchemy import Select, func, select
+from sqlalchemy import func, select
 
 from app.api.deps import SessionDep
 from app.core.errors import DataNotAvailableError, ValidationError
@@ -357,7 +357,7 @@ async def screener(request: ScreenerRequest, session: SessionDep) -> Envelope[li
             f"{len(available)} factors are available for that session."
         )
 
-    query: Select[Any] = select(
+    query = select(
         FactorScore.symbol,
         FactorScore.factor_name,
         FactorScore.score,

@@ -81,12 +81,12 @@ def standardise(values: pl.Series, method: Standardisation, sectors: pl.Series |
     if method is Standardisation.SECTOR_ZSCORE and sectors is not None:
         # Window expressions keep row order by construction; see _demedian_by_group.
         frame = pl.DataFrame({"v": values, "g": sectors.fill_null("__none__")})
-        mean = pl.col("v").mean().over("g")
-        sd = pl.col("v").std(ddof=1).over("g")
+        group_mean = pl.col("v").mean().over("g")
+        group_sd = pl.col("v").std(ddof=1).over("g")
         return frame.select(
-            pl.when(sd.is_null() | (sd == 0))
+            pl.when(group_sd.is_null() | (group_sd == 0))
             .then(None)
-            .otherwise((pl.col("v") - mean) / sd)
+            .otherwise((pl.col("v") - group_mean) / group_sd)
             .alias("v")
         ).to_series()
 
