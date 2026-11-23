@@ -1,0 +1,21 @@
+# The image installs its own dependencies in the `deps` stage. Anything a
+# developer installed on the host must never reach the build context: the
+# builder stage runs `COPY . .` after copying the container's node_modules, so a
+# host node_modules overwrites it.
+#
+# That is not hypothetical. pnpm on Windows builds node_modules out of NTFS
+# junctions, which arrive in a Linux container as broken links, and the build
+# failed with "Cannot find module '/app/node_modules/next/dist/bin/next'" on the
+# first machine that had run `pnpm install` locally. CI never saw it because a
+# fresh checkout has no node_modules to copy.
+node_modules
+.next
+out
+.turbo
+coverage
+*.tsbuildinfo
+next-env.d.ts
+npm-debug.log*
+.pnpm-debug.log*
+.env
+.env.*

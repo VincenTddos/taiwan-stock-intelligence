@@ -202,6 +202,8 @@ services:
     build:
       context: ./web
       dockerfile: ../docker/web.Dockerfile
+      args:
+        BACKEND_URL: http://api:8000
     container_name: twquant-web
     environment:
       BACKEND_URL: http://api:8000

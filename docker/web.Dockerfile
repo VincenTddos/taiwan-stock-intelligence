@@ -17,6 +17,12 @@ RUN corepack enable
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 ENV NEXT_TELEMETRY_DISABLED=1
+# `rewrites()` in next.config.ts is evaluated by `next build` and frozen into
+# .next/routes-manifest.json, so BACKEND_URL must exist at build time. Set only
+# at runtime (compose `environment:`), the image kept the localhost:8000
+# fallback and every /api/v1 call from inside the container was refused.
+ARG BACKEND_URL=http://api:8000
+ENV BACKEND_URL=${BACKEND_URL}
 RUN pnpm build
 
 FROM node:22-alpine AS runtime
