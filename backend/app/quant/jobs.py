@@ -401,7 +401,14 @@ async def compute_for_date(
     report.factors_computed = len(computable)
 
     raw = fct.compute_raw(joined, computable)
-    processed = _process_factors(joined, computable, raw)
+    # Raw factors need the whole lookback (a 60-day momentum reads 60 sessions),
+    # but the cross-sectional pipeline is a function of one date's values only
+    # (see factors/pipeline.py), and only `trading_date` is written. Processing
+    # every session in the lookback produced identical output for this date,
+    # once per session instead of once: on Docker Desktop (16 polars threads)
+    # a single call took minutes and the integration suite never finished.
+    raw_today = {name: f.filter(pl.col("trading_date") == trading_date) for name, f in raw.items()}
+    processed = _process_factors(joined, computable, raw_today)
     report.timings_ms["factors"] = int((time.perf_counter() - factor_started) * 1000)
 
     if persist:

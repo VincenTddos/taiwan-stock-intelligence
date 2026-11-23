@@ -41,10 +41,13 @@ def winsorize(values: pl.Series, lower: float, upper: float) -> pl.Series:
 
 def _demedian_by_group(values: pl.Series, groups: pl.Series) -> pl.Series:
     """Subtract each group's median. Median, not mean: sectors are small."""
+    # A window expression, not group_by + join: polars does not promise a join
+    # keeps the left frame's row order (`maintain_order` defaults to "none"),
+    # and these values are matched back to symbols purely by position.
     frame = pl.DataFrame({"v": values, "g": groups.fill_null("__none__")})
-    medians = frame.group_by("g").agg(pl.col("v").median().alias("m"))
-    joined = frame.join(medians, on="g", how="left")
-    return (joined["v"] - joined["m"]).rename(values.name or "v")
+    return frame.select(pl.col("v") - pl.col("v").median().over("g"))["v"].rename(
+        values.name or "v"
+    )
 
 
 def _residualise(values: pl.Series, control: pl.Series) -> pl.Series:
@@ -76,15 +79,14 @@ def standardise(values: pl.Series, method: Standardisation, sectors: pl.Series |
         return (ranks - 1) / max(count - 1, 1)
 
     if method is Standardisation.SECTOR_ZSCORE and sectors is not None:
+        # Window expressions keep row order by construction; see _demedian_by_group.
         frame = pl.DataFrame({"v": values, "g": sectors.fill_null("__none__")})
-        stats = frame.group_by("g").agg(
-            pl.col("v").mean().alias("m"), pl.col("v").std(ddof=1).alias("s")
-        )
-        joined = frame.join(stats, on="g", how="left")
-        return pl.select(
-            pl.when(joined["s"].is_null() | (joined["s"] == 0))
+        mean = pl.col("v").mean().over("g")
+        sd = pl.col("v").std(ddof=1).over("g")
+        return frame.select(
+            pl.when(sd.is_null() | (sd == 0))
             .then(None)
-            .otherwise((joined["v"] - joined["m"]) / joined["s"])
+            .otherwise((pl.col("v") - mean) / sd)
             .alias("v")
         ).to_series()
 
