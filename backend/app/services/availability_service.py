@@ -29,7 +29,7 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from typing import Any
 
-from sqlalchemy import Select, and_, func, or_, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger
@@ -110,7 +110,7 @@ class DataAvailabilityService:
         cutoff = _as_datetime(as_of)
 
         if dataset == "daily_prices":
-            stmt: Select[Any] = select(func.count(), func.max(DailyPrice.trading_date)).where(
+            stmt = select(func.count(), func.max(DailyPrice.trading_date)).where(
                 self.daily_price_filter(cutoff), DailyPrice.market == market
             )
             if symbol:

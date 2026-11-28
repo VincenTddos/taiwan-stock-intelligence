@@ -16,7 +16,7 @@ import asyncio
 import hashlib
 import random
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Protocol
 
 import httpx
 
@@ -31,6 +31,23 @@ log = get_logger(__name__)
 USER_AGENT = "twquant/0.2 (+https://github.com/twquant; research; contact via repo)"
 
 RETRY_STATUS = frozenset({429, 500, 502, 503, 504})
+
+
+class JsonFetcher(Protocol):
+    """What a provider needs from a transport, and nothing else.
+
+    Stated as a protocol so replay can substitute the transport without
+    substituting the provider. A recorded response run through a stand-in parser
+    proves nothing about the parser that runs in production; run through the
+    real provider it proves quite a lot, and that is only possible if the seam
+    is here rather than one layer up.
+    """
+
+    async def fetch_json(
+        self, path: str, *, dataset: str, params: dict[str, Any] | None = None
+    ) -> tuple[Any, SourceMetadata]: ...
+
+    async def aclose(self) -> None: ...
 
 
 class HttpFetcher:
@@ -214,4 +231,4 @@ class HttpFetcher:
             return False, round(latency, 2), str(exc)[:200]
 
 
-__all__ = ["RETRY_STATUS", "USER_AGENT", "HttpFetcher"]
+__all__ = ["RETRY_STATUS", "USER_AGENT", "HttpFetcher", "JsonFetcher"]

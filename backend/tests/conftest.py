@@ -167,6 +167,35 @@ async def seeded_sources(session):
 
 
 @pytest.fixture
+async def seeded_corporate_action_sources(session):
+    """The three TWSE corporate action endpoints as registry rows.
+
+    Three rows rather than one because each sees a different slice, and the
+    coverage union across them is what decides whether a symbol may be adjusted.
+    """
+    from app.models.ops import DataSource, SourceStatus
+    from app.providers.registry import CORPORATE_ACTION_PROVIDER_TYPES
+
+    for code in sorted(CORPORATE_ACTION_PROVIDER_TYPES):
+        session.add(
+            DataSource(
+                code=code,
+                name=code,
+                provider_type=code,
+                base_url="https://openapi.twse.com.tw/v1",
+                market="TWSE",
+                rate_limit_per_minute=60,
+                max_concurrency=2,
+                min_interval_ms=0,
+                timeout_seconds=20,
+                max_retries=3,
+                status=SourceStatus.ACTIVE,
+            )
+        )
+    await session.commit()
+
+
+@pytest.fixture
 async def redis_client(redis_available, settings):
     if not redis_available:
         pytest.skip("Redis not reachable")

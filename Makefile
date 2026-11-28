@@ -13,7 +13,7 @@ help: ## Show this help
 # ---------------------------------------------------------------- setup
 .PHONY: setup
 setup: ## Create the local dev environment (venv + node modules)
-	cd $(BACKEND) && uv venv .venv && . .venv/bin/activate && uv pip install -e ".[dev]" asgi-lifespan
+	cd $(BACKEND) && uv venv .venv && . .venv/bin/activate && uv pip install -e ".[dev]"
 	cd $(WEB) && pnpm install
 	@test -f .env || (cp .env.example .env && echo "created .env — edit the CHANGE-ME values")
 
@@ -85,7 +85,7 @@ format: ## Auto-format
 	cd $(BACKEND) && . .venv/bin/activate && ruff check --fix . && ruff format .
 
 typecheck: ## Type-check backend (mypy --strict) + frontend (tsc)
-	cd $(BACKEND) && . .venv/bin/activate && mypy app
+	cd $(BACKEND) && . .venv/bin/activate && mypy app scripts
 	cd $(WEB) && pnpm typecheck
 
 test: test-backend test-frontend ## Run every test
@@ -127,13 +127,13 @@ clone-check: ## Clone fresh, install fresh, typecheck — what CI actually does
 	@cp $(BACKEND)/.env /tmp/twquant-clonecheck/backend/.env 2>/dev/null || true
 	@cd /tmp/twquant-clonecheck/backend && \
 		uv venv .venv >/dev/null 2>&1 && . .venv/bin/activate && \
-		uv pip install -q -e ".[dev]" asgi-lifespan && \
+		uv pip install -q -e ".[dev]" && \
 		ruff check . >/dev/null && ruff format --check . >/dev/null && \
-		{ mypy app > mypy.log 2>&1 || { cat mypy.log; false; }; } && \
+		{ mypy app scripts > mypy.log 2>&1 || { cat mypy.log; false; }; } && \
 		tail -1 mypy.log | sed 's/^/  /' && \
 		PYTHONPATH=/tmp/twquant-clonecheck/backend python -c \
 		"from app.main import create_app; from app.db.base import Base; \
-		 import app.models.market, app.models.ops, app.models.user, app.models.platform; \
+		 import app.models.market, app.models.ops, app.models.user, app.models.platform, app.models.quant, app.models.news; \
 		 assert create_app(); print(f'  clean clone imports — {len(Base.metadata.tables)} tables')"
 	@rm -rf /tmp/twquant-clonecheck
 
@@ -149,7 +149,11 @@ verify: ## Probe a running stack and print a health summary
 	@bash scripts/verify_stack.sh
 
 # ---------------------------------------------------------------- ingestion
-.PHONY: seed-sources ingest-calendar ingest-daily ingest-all backfill
+.PHONY: seed-sources seed-news-sources ingest-calendar ingest-daily ingest-all backfill \
+	ingest-corporate-actions adjust quant-compute quant-backfill quant-validate
+seed-news-sources: ## Seed the news source registry (permission, licence, credibility)
+	cd $(BACKEND) && . .venv/bin/activate && python -m scripts.seed_news_sources
+
 seed-sources: ## Seed the data source registry and freshness contracts
 	cd $(BACKEND) && . .venv/bin/activate && python -m scripts.seed_sources
 
@@ -161,6 +165,29 @@ ingest-daily: ## Ingest the latest session (prices, indices, institutional flow)
 
 ingest-all: ingest-calendar ingest-daily ## Calendar + master + latest session
 	cd $(BACKEND) && . .venv/bin/activate && python -m scripts.ingest master
+
+ingest-corporate-actions: ## Corporate actions + coverage:  make ingest-corporate-actions FROM=2019-01-01 TO=2026-12-31
+	cd $(BACKEND) && . .venv/bin/activate && \
+		python -m scripts.ingest corporate-actions \
+		--from $(or $(FROM),2019-01-01) --to $(or $(TO),$(shell date +%Y-%m-%d))
+
+adjust: ## Adjustment factors and adjusted closes:  make adjust FROM=2019-01-01 TO=2026-08-19
+	cd $(BACKEND) && . .venv/bin/activate && \
+		python -m scripts.ingest adjust \
+		--from $(or $(FROM),2019-01-01) --to $(or $(TO),$(shell date +%Y-%m-%d)) \
+		$(if $(SYMBOL),--symbol $(SYMBOL),)
+
+quant-compute: ## Indicators + factors for one session:  make quant-compute DATE=2026-08-14
+	cd $(BACKEND) && . .venv/bin/activate && \
+		python -m scripts.quant compute --date $(or $(DATE),$(shell date +%Y-%m-%d))
+
+quant-backfill: ## Recompute indicators + factors over a range
+	cd $(BACKEND) && . .venv/bin/activate && \
+		python -m scripts.quant backfill --from $(FROM) --to $(TO)
+
+quant-validate: ## Grade every factor over a window:  make quant-validate FROM=2026-01-01 TO=2026-08-14
+	cd $(BACKEND) && . .venv/bin/activate && \
+		python -m scripts.quant validate --from $(FROM) --to $(TO)
 
 backfill: ## Resumable backfill:  make backfill DATASET=institutional_flow FROM=2019-01-01 TO=2026-08-15
 	cd $(BACKEND) && . .venv/bin/activate && \

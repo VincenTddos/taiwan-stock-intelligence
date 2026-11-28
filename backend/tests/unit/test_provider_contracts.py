@@ -19,6 +19,7 @@ import pytest
 
 from app.providers import twse
 from app.providers.base import ProviderError, ProviderErrorKind
+from app.providers.replay import ReplayFetcher
 
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures" / "twse"
 
@@ -204,6 +205,57 @@ class TestInstitutionalFlowContract:
         )
         assert not errors
         assert "00403A" in {r["symbol"] for r in records}
+
+    def test_the_parser_does_not_filter_warrants_so_the_request_must(self):
+        """`selectType=ALL` is 92% warrants, and the parser reads every one.
+
+        They are perfectly well-formed rows, so nothing after the request can be
+        relied on to keep them out: no validation rule fires, nothing is
+        quarantined, and seven rows a day are stored for each of 14,307
+        instruments the platform has no price for. The first live run wrote
+        109,459 rows where 9,310 were wanted and reported complete success.
+
+        The recording is the real `ALL` response for 2026-08-14, sampled. Its
+        note carries the full counts, measured against `ALLBUT0999` for the same
+        day: every one of the 14,307 securities the exchange's selector drops is
+        a six-character code beginning 03-08, and every one of the 1,330 it
+        keeps had a daily price.
+        """
+        payload = load("t86_all_selector_20260814.json")
+        note = payload["_fixture_note"]
+        records, errors = twse.parse_institutional_flow(payload, date(2026, 8, 14))
+
+        assert not errors
+        parsed = {r["symbol"] for r in records}
+        dropped = set(note["sampled_symbols_dropped_by_ALLBUT0999"])
+        assert dropped, "the recording no longer contains a warrant"
+        assert dropped <= parsed, "the parser is not what keeps warrants out"
+        assert all(len(s) == 6 and "03" <= s[:2] <= "08" for s in dropped)
+
+        assert note["full_response_rows"] == 15_637
+        assert note["rows_only_in_ALL"] == 14_307
+        assert note["rows_also_returned_by_ALLBUT0999"] == 1_330
+
+    async def test_the_request_asks_the_exchange_to_leave_warrants_out(self):
+        """The real provider, with only its transport swapped for a recording.
+
+        Guards the one line that decides whether a session is 9,000 rows or
+        109,000. `ALL` reads like the safe, complete choice, which is exactly
+        why it was chosen the first time and why it would be chosen again.
+        """
+        provider = twse.TWSEProvider()
+        await provider._rwd.aclose()
+        provider._rwd = ReplayFetcher(  # type: ignore[assignment]
+            source="TWSE", recordings={"/fund/T86": "t86_20260814.json"}
+        )
+        try:
+            result = await provider.get_institutional_flow(trading_date=date(2026, 8, 14))
+        finally:
+            await provider.aclose()
+
+        assert result.metadata.params["selectType"] == "ALLBUT0999"
+        assert result.metadata.params["date"] == "20260814"
+        assert twse.T86_SELECT_TYPE != "ALL"
 
 
 # --------------------------------------------------------- stock master

@@ -290,8 +290,8 @@ async def measure_coverage(session: AsyncSession) -> dict[str, Any]:
         await session.execute(
             select(RawIngestion.transport, func.count()).group_by(RawIngestion.transport)
         )
-    ).all()
-    cov["raw_ingestions"]["by_transport"] = dict(transports)
+    ).tuples()
+    cov["raw_ingestions"]["by_transport"] = dict(transports.all())
 
     # Trading days in range that have no price row at all. This is the gap
     # measurement that matters for a backtest: a missing session is not a zero,
@@ -315,6 +315,26 @@ async def measure_coverage(session: AsyncSession) -> dict[str, Any]:
         cov["daily_prices"]["expected_trading_days"] = len(expected)
         cov["daily_prices"]["days_with_data"] = len(present)
         cov["daily_prices"]["missing_days"] = [d.isoformat() for d in missing]
+
+    # Institutional flow for a security with no price that day. This is the
+    # number that would have exposed `selectType=ALL` on the first run: 14,307
+    # of 15,637 securities in the flow table had no price, because they were
+    # warrants. It should now be zero, and it is measured rather than assumed
+    # so that if the exchange ever changes what its selector means, the report
+    # says so instead of the table quietly growing tenfold again.
+    unpriced = (
+        await session.execute(
+            select(func.count(func.distinct(InstitutionalFlow.symbol))).where(
+                ~select(DailyPrice.symbol)
+                .where(
+                    DailyPrice.symbol == InstitutionalFlow.symbol,
+                    DailyPrice.trading_date == InstitutionalFlow.trading_date,
+                )
+                .exists()
+            )
+        )
+    ).scalar_one()
+    cov["institutional_flow"]["symbols_without_price"] = int(unpriced)
     return cov
 
 
@@ -452,6 +472,11 @@ def print_report(payload: dict[str, Any]) -> None:
         if miss:
             shown = ", ".join(miss[:12]) + (f" … +{len(miss) - 12} more" if len(miss) > 12 else "")
             print(f"  missing sessions     {shown}")
+    flow = cov.get("institutional_flow", {})
+    if flow.get("rows"):
+        unpriced = flow.get("symbols_without_price", 0)
+        note = "" if not unpriced else "   <-- securities the platform cannot price"
+        print(f"  flow without price   {unpriced} of {flow.get('symbols', 0)} symbols{note}")
     if cov.get("raw_ingestions", {}).get("by_transport"):
         print(f"  ingestion transports {cov['raw_ingestions']['by_transport']}")
 

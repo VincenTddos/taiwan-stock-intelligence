@@ -22,12 +22,14 @@ context. Only the first is allowed to reject.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 from enum import StrEnum
 from typing import Any
 
 from app.core.logging import get_logger
+from app.models.market import CorporateActionType
+from app.providers.corporate_actions import EXPECTED_FIELDS
 
 log = get_logger(__name__)
 
@@ -258,6 +260,147 @@ class DataQualityService:
                     listing,
                 )
             )
+        return ValidationResult(rec, v)
+
+    # --------------------------------------------------- corporate actions
+    def validate_corporate_action(
+        self, rec: dict[str, Any], *, today: date | None = None
+    ) -> ValidationResult:
+        """Reject a record that claims to be one action and carries another's numbers.
+
+        This is the check that keeps a parser bug from becoming a silent
+        adjustment of zero. An action type is a claim about which economics
+        apply; a record making that claim while carrying none of them cannot
+        produce a factor, and the alternative to rejecting it is a row that
+        looks like a covered event and adjusts nothing.
+
+        The exception is an event the market has announced but not yet priced.
+        TWSE listed 1563's cash capital reduction for 2026-09-07 with every
+        price column as `-`, because the reduction had not happened yet. The
+        first version of this check quarantined it — which was worse than
+        storing it: quarantine put the event outside `corporate_actions`
+        entirely, so the coverage guard would have passed the symbol and the
+        adjustment would have run over that date without it. Refusal has to
+        happen where the event is visible, so a future event with unpublished
+        terms is stored and flagged, and `AdjustmentService` blocks the symbol
+        when it reaches it.
+
+        `today` is a parameter rather than a call to `date.today()` so the
+        distinction between "not published yet" and "should exist and does not"
+        can be tested at all.
+        """
+        now = today or date.today()
+        v: list[Violation] = []
+
+        symbol = rec.get("symbol")
+        ex_date = rec.get("ex_date")
+        action_type = rec.get("action_type")
+
+        if not symbol:
+            v.append(Violation("CA00", Severity.FATAL, "missing symbol", "symbol"))
+        if not isinstance(ex_date, date):
+            v.append(Violation("CA01", Severity.FATAL, "missing or malformed ex_date", "ex_date"))
+        if action_type is None:
+            v.append(Violation("CA02", Severity.FATAL, "missing action_type", "action_type"))
+        elif CorporateActionType(str(action_type)) not in EXPECTED_FIELDS:
+            v.append(
+                Violation(
+                    "CA02",
+                    Severity.FATAL,
+                    f"unknown action_type {action_type!r}",
+                    "action_type",
+                    action_type,
+                )
+            )
+
+        # Knowledge time is not optional and is never inferred here. A record
+        # without it cannot be filtered out of a backtest that has not reached
+        # the announcement, and a default would make that failure invisible.
+        announced = rec.get("announced_at")
+        if not isinstance(announced, datetime):
+            v.append(Violation("CA03", Severity.FATAL, "missing announced_at", "announced_at"))
+        elif isinstance(ex_date, date) and announced.date() > ex_date:
+            v.append(
+                Violation(
+                    "CA04",
+                    Severity.WARN,
+                    f"announced_at {announced.date()} is after ex_date {ex_date}",
+                    "announced_at",
+                    announced,
+                )
+            )
+
+        for money in (
+            "cash_dividend",
+            "stock_dividend",
+            "subscription_price",
+            "subscription_ratio",
+            "split_ratio",
+            "cash_returned_per_share",
+        ):
+            value = rec.get(money)
+            if isinstance(value, Decimal) and value < 0:
+                v.append(Violation("CA05", Severity.FATAL, f"negative {money}", money, value))
+
+        if action_type is not None and (kind := CorporateActionType(str(action_type))) in (
+            EXPECTED_FIELDS
+        ):
+            expected = EXPECTED_FIELDS[kind]
+            present = {f for f in expected if rec.get(f) is not None}
+            # A capital reduction is the one class whose economics the exchange
+            # does not publish: the observable is a single price change covering
+            # both a share ratio and any cash returned — one equation, two
+            # unknowns. Its published reference prices pin the price effect
+            # directly, so they stand in for the ratio here rather than the
+            # ratio being back-solved and presented as if it were a source fact.
+            priced = (
+                rec.get("reference_price_before") is not None
+                and rec.get("reference_price_after") is not None
+            )
+            if not present and not (kind is CorporateActionType.CAPITAL_REDUCTION and priced):
+                unpublished = isinstance(ex_date, date) and ex_date > now
+                v.append(
+                    Violation(
+                        "CA09" if unpublished else "CA06",
+                        Severity.WARN if unpublished else Severity.FATAL,
+                        (
+                            f"{kind} on {ex_date} has not been priced yet; stored so "
+                            f"the adjustment can refuse it"
+                            if unpublished
+                            else f"{kind} carries none of its expected fields {sorted(expected)}"
+                        ),
+                        "action_type",
+                        action_type,
+                    )
+                )
+            if kind is CorporateActionType.RIGHTS_ISSUE and rec.get("subscription_price") is None:
+                # Real, known, and not yet adjustable. Stored so the event is on
+                # the record; flagged so the adjustment refuses rather than
+                # treating an unpublished price as free shares.
+                v.append(
+                    Violation(
+                        "CA07",
+                        Severity.WARN,
+                        "rights issue has no subscription price yet",
+                        "subscription_price",
+                    )
+                )
+
+        before = rec.get("reference_price_before")
+        after = rec.get("reference_price_after")
+        if isinstance(before, Decimal) and isinstance(after, Decimal) and before > 0:
+            ratio = after / before
+            if not (Decimal("0.2") <= ratio <= Decimal("5")):
+                v.append(
+                    Violation(
+                        "CA08",
+                        Severity.WARN,
+                        f"reference prices imply a {ratio:.2f}x price change",
+                        "reference_price_after",
+                        after,
+                    )
+                )
+
         return ValidationResult(rec, v)
 
     # -------------------------------------------------------- completeness

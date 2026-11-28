@@ -15,13 +15,22 @@ dependencies = [
     "email-validator>=2.2.0",
     "greenlet>=3.1.0",
     "redis>=5.2.0",
-    "celery>=5.4.0",
+    "celery[redis]>=5.4.0",
     "structlog>=24.4.0",
     "argon2-cffi>=23.1.0",
     "pyjwt>=2.10.0",
     "httpx>=0.28.0",
     "python-multipart>=0.0.17",
     "tenacity>=9.0.0",
+    # Quant engine. polars for the panel maths (ADR-026), numpy for the
+    # statistics polars has no primitive for — OLS residuals, correlation
+    # matrices, t statistics.
+    "polars>=1.17.0",
+    # Upper bound, not laziness: numpy 2.5 requires Python 3.12 and the runtime
+    # image is 3.11 (`docker/api.Dockerfile`). Unpinned, a developer on 3.12
+    # gets 2.5 and the container gets 2.2 — two different libraries typechecked
+    # once. Raise both together or neither.
+    "numpy>=2.1.0,<2.3.0",
 ]
 
 [project.optional-dependencies]
@@ -29,6 +38,17 @@ dev = [
     "pytest>=8.3.0",
     "pytest-asyncio>=0.24.0",
     "pytest-cov>=6.0.0",
+    # conftest imports this, so the suite cannot collect without it. It was
+    # installed ad hoc by CI and by clone-check and declared nowhere, which
+    # meant `pip install -e ".[dev]" && pytest` — the sequence the contributing
+    # guide gives — failed on a fresh machine at the first import.
+    "asgi-lifespan>=2.1.0",
+    # The golden reference for the indicator library. A dev dependency, never a
+    # runtime one: `QUANT_ENGINE.md` §1.1 keeps the C library out of the
+    # deployed image, and the tests compare against it rather than the code
+    # calling it. Without it the golden tests skip, which is a gap in the
+    # environment rather than a passing suite — the skip says so.
+    "ta-lib>=0.6.0",
     "ruff>=0.8.0",
     "mypy>=1.13.0",
     # No types-redis. redis ships py.typed and has since 5.0, and mypy prefers

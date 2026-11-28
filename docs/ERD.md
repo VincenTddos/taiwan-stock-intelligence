@@ -709,6 +709,23 @@ CREATE TABLE factor_scores (
 SELECT create_hypertable('factor_scores','trading_date', chunk_time_interval=>INTERVAL '1 month');
 ```
 
+> **實作與本節設計的兩處差異（Phase 3，2026-08-20）**
+>
+> 1. **鍵是 `symbol` + `market`，不是 `stock_id`。** 本節寫的是 `stocks(id)`，
+>    但實際建出來的是 SCD2 的 `stock_master` —— 那裡的 `id` 指的是「某家公司某段
+>    期間的屬性版本」，不是公司本身。把十年的指標指到其中一列，等於公司改名時
+>    整段歷史被悄悄改掛。`daily_prices` 已經以 symbol 為鍵，這幾張表跟著。
+> 2. **多了 `price_basis` 與 `feature_version` 進主鍵。**
+>    `price_basis` 記錄該列是用還原價還是原始價算的（ADR-027）；
+>    `feature_version` 進主鍵讓同一天可以並存兩個版本的因子值，重算是新增而非覆蓋
+>    （ADR-028）。
+>
+> `factor_returns`（Fama-MacBeth 逐日因子報酬）尚未建立 —— 它屬於 §3 的多因子模型，
+> 由 Phase 5 的 AI Score 消費，Phase 3 沒有東西會讀它。
+>
+> 另外實作多了一張 `factor_validity`：每個因子在某個視窗下的 IC / IC-IR / 分層報酬
+> 與判定結果。不覆蓋，因為「2019 年有效、2024 年失效」是這張表最有價值的訊息。
+
 ### 7.3 `ai_scores` + `ai_score_contributions`（★ 可解釋性的載體）
 
 ```sql
@@ -1459,6 +1476,9 @@ SELECT COUNT(*) FROM financials WHERE announced_at::date < period_end;
 007_quality             data_quality_scores, data_freshness, data_gaps,
                         quarantine_records, backfill_progress
 008_derived_quant       technical_indicators, factor_scores, factor_returns
+                        （實作為 0007_derived_quant：technical_indicators、
+                        factor_scores、factor_validity、feature_versions；
+                        factor_returns 留待 Phase 5）
 009_news                news_sources, news, news_entities, news_stock_relations,
                         news_events, news_embeddings, news_reactions, llm_failures
 010_scoring             scoring_weights, ai_scores, ai_score_contributions

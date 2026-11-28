@@ -32,7 +32,11 @@ from app.models.market import (
 from app.models.ops import DataQuarantine, RawIngestion, Transport
 from app.providers.base import ProviderResult, SourceMetadata
 from app.services.availability_service import DataAvailabilityService
-from app.services.calendar_service import CalendarNotPopulated, TradingCalendarService
+from app.services.calendar_service import (
+    CalendarNotPopulated,
+    ScheduleYearMismatch,
+    TradingCalendarService,
+)
 
 pytestmark = pytest.mark.integration
 
@@ -93,6 +97,29 @@ class TestTradingCalendar:
         await svc.assert_trading_day(date(2026, 8, 14))
         with pytest.raises(ValueError, match="not a trading day"):
             await svc.assert_trading_day(date(2026, 1, 1))
+
+    async def test_rolled_over_schedule_refuses_instead_of_erasing_holidays(
+        self, session, calendar_ready
+    ):
+        """Measured live 2026-11-23: the holiday endpoint had already rolled to
+        2027, so a 2026 rebuild got zero in-year closures and turned every
+        holiday into a trading day. The build must refuse before writing."""
+        svc = TradingCalendarService(session)
+        next_year_only = [
+            {"calendar_date": date(2027, 1, 1), "session_type": "CLOSED", "holiday_name": "x"}
+        ]
+        with pytest.raises(ScheduleYearMismatch, match="2027"):
+            await svc.build_year(2026, next_year_only)
+        assert await svc.is_trading_day(date(2026, 1, 1)) is False
+        assert await svc.is_trading_day(date(2026, 5, 1)) is False
+
+    async def test_empty_schedule_is_refused(self, session, seeded_sources):
+        with pytest.raises(ScheduleYearMismatch):
+            await TradingCalendarService(session).build_year(2026, [])
+        total = (
+            await session.execute(select(func.count()).select_from(TradingCalendar))
+        ).scalar_one()
+        assert total == 0
 
 
 # ====================================================== holiday ingestion

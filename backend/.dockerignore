@@ -1,0 +1,20 @@
+# The backend Dockerfile copies named directories rather than `COPY . .`, so a
+# host virtualenv cannot overwrite the image's. This file exists for the same
+# reason web/.dockerignore does, one step earlier: everything in the context is
+# sent to the Docker daemon before any COPY runs, and a local .venv is several
+# hundred megabytes that no stage uses. It also keeps a developer's .env, which
+# holds real local secrets, out of the build context entirely.
+.venv
+venv
+__pycache__
+*.pyc
+.pytest_cache
+.mypy_cache
+.ruff_cache
+.coverage
+htmlcov
+coverage.xml
+openapi.json
+mypy.log
+.env
+.env.*

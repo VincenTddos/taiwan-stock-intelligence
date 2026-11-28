@@ -20,6 +20,9 @@ from app.models.ops import DataFreshness, DataSource, SourceStatus
 from app.providers.twse import OPENAPI_BASE, RWD_BASE
 
 VERIFIED_AT = datetime(2026, 8, 15, tzinfo=UTC)
+#: The corporate action endpoints were fetched and parsed later than the
+#: rest, once their payloads had been recorded — see ADR-022.
+CORPORATE_ACTIONS_VERIFIED_AT = datetime(2026, 8, 17, tzinfo=UTC)
 
 GOV_LICENCE = "政府資料開放授權條款第1版 (Open Government Data License, Taiwan v1.0)"
 
@@ -158,6 +161,105 @@ SOURCES: list[dict[str, object]] = [
         "notes": (
             "Form-POST driven with HTML responses; more fragile than the OpenAPI "
             "sources. Prefer TWSE OpenAPI equivalents where they exist."
+        ),
+    },
+    # --- corporate actions ------------------------------------------------
+    # Three rows, not one. Each endpoint sees a different slice of the same
+    # subject, and `corporate_action_coverage` records per source what was
+    # searched for — so collapsing them into a single row would make the
+    # coverage union that gates adjustment unable to distinguish "this source
+    # found no rights issue" from "this source cannot see rights issues".
+    {
+        "code": "TWSE_EXRIGHT_FORECAST",
+        "name": "臺灣證券交易所 除權除息預告表 (TWT48U_ALL)",
+        "provider_type": "TWSE_EXRIGHT_FORECAST",
+        "base_url": f"{OPENAPI_BASE}/exchangeReport/TWT48U_ALL",
+        "market": "TWSE",
+        "frequency": "DAILY",
+        "requires_auth": False,
+        "rate_limit_per_minute": 60,
+        "max_concurrency": 2,
+        "min_interval_ms": 350,
+        "timeout_seconds": 20,
+        "max_retries": 3,
+        "status": SourceStatus.ACTIVE,
+        "verified_at": CORPORATE_ACTIONS_VERIFIED_AT,
+        "licence": GOV_LICENCE,
+        "coverage": {
+            "datasets": ["corporate_actions"],
+            "action_types": ["CASH_DIVIDEND", "STOCK_DIVIDEND", "RIGHTS_ISSUE"],
+            "history": "none — a forward-looking snapshot of upcoming ex-dates",
+        },
+        "notes": (
+            "The only source that decomposes an event into cash, share ratio and "
+            "subscription terms. It carries no history at all, so its coverage "
+            "claim starts at the day it is run: asked about 2019 it answers with "
+            "nothing, and recording that as coverage would turn 'cannot see the "
+            "past' into 'no dividends were paid'. `尚未公告` appears in the "
+            "subscription price field and must never be coerced to zero."
+        ),
+    },
+    {
+        "code": "TWSE_EXRIGHT_RESULTS",
+        "name": "臺灣證券交易所 除權除息計算結果表 (TWT49U)",
+        "provider_type": "TWSE_EXRIGHT_RESULTS",
+        "base_url": f"{RWD_BASE}/exRight/TWT49U",
+        "market": "TWSE",
+        "frequency": "DAILY",
+        "requires_auth": False,
+        "rate_limit_per_minute": 60,
+        "max_concurrency": 2,
+        "min_interval_ms": 350,
+        "timeout_seconds": 20,
+        "max_retries": 3,
+        "status": SourceStatus.ACTIVE,
+        "verified_at": CORPORATE_ACTIONS_VERIFIED_AT,
+        "licence": GOV_LICENCE,
+        "coverage": {
+            "datasets": ["corporate_actions"],
+            "action_types": ["CASH_DIVIDEND"],
+            "history": "a full year per request; verified back to 2019",
+        },
+        "notes": (
+            "Cash dividends only, and deliberately so. Its 權值+息值 column is a "
+            "single figure in price units covering a share ratio, a subscription "
+            "or both, so 權 and 權息 rows cannot be decomposed and are reported "
+            "as undecomposable rather than guessed at. What it is uniquely good "
+            "for is the exchange's own 除權息前收盤價 and 除權息參考價, which is "
+            "what every computed factor is reconciled against."
+        ),
+    },
+    {
+        "code": "TWSE_CAPITAL_REDUCTION",
+        "name": "臺灣證券交易所 減資恢復買賣參考價格 (TWTAUU)",
+        "provider_type": "TWSE_CAPITAL_REDUCTION",
+        "base_url": f"{RWD_BASE}/reducation/TWTAUU",
+        "market": "TWSE",
+        "frequency": "EVENT",
+        "requires_auth": False,
+        "rate_limit_per_minute": 60,
+        "max_concurrency": 2,
+        "min_interval_ms": 350,
+        # Measured, not guessed: this endpoint answers a year-to-date in
+        # about 3 s and a full year in 30. Twenty seconds timed out on the
+        # first live run and looked like an outage.
+        "timeout_seconds": 60,
+        "max_retries": 3,
+        "status": SourceStatus.ACTIVE,
+        "verified_at": CORPORATE_ACTIONS_VERIFIED_AT,
+        "licence": GOV_LICENCE,
+        "coverage": {
+            "datasets": ["corporate_actions"],
+            "action_types": ["CAPITAL_REDUCTION"],
+            "history": "2019 to date in a single request",
+        },
+        "notes": (
+            "TWSE spells the path 'reducation'; 'reduction' 404s. The reduction "
+            "ratio and any cash returned are two unknowns behind one published "
+            "price change, so neither is back-solved — the exchange's own before "
+            "and after prices are the factor for these events, which is the one "
+            "class where a published price effect is used directly rather than "
+            "as a check."
         ),
     },
 ]

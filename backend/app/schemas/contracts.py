@@ -242,6 +242,151 @@ class NewsDocument(_Base):
     provenance: Provenance | None = None
 
 
+class ExtractionMethod(StrEnum):
+    """How an entity was found in a story.
+
+    The distinction that matters is between `SOURCE_ATTRIBUTED` and everything
+    else. When an exchange announcement carries the company's own code, the link
+    is the publisher's statement; a dictionary hit and a language model are both
+    inferences. Collapsing the two would let an inference inherit an
+    announcement's certainty.
+    """
+
+    DICTIONARY = "DICTIONARY"
+    SOURCE_ATTRIBUTED = "SOURCE_ATTRIBUTED"
+    LLM = "LLM"
+    HYBRID = "HYBRID"
+
+
+class TimeHorizon(StrEnum):
+    INTRADAY = "INTRADAY"
+    SHORT = "SHORT"
+    MEDIUM = "MEDIUM"
+    LONG = "LONG"
+
+
+class EvidenceSnippet(_Base):
+    """Where in the text a claim came from.
+
+    Offsets, not just the quoted string, so the claim can be highlighted in the
+    original rather than searched for again — a search would find the second
+    occurrence as readily as the first.
+    """
+
+    text: str = Field(min_length=1, max_length=500)
+    char_start: int | None = Field(default=None, ge=0)
+    char_end: int | None = Field(default=None, ge=0)
+
+    @model_validator(mode="after")
+    def offsets_ordered(self) -> EvidenceSnippet:
+        if (
+            self.char_start is not None
+            and self.char_end is not None
+            and self.char_end <= self.char_start
+        ):
+            raise ValueError("char_end must be greater than char_start")
+        return self
+
+
+class NewsEntityMention(_Base):
+    """One entity found in one story."""
+
+    entity_type: str
+    entity_text: str = Field(min_length=1, max_length=150)
+    normalized: str | None = None
+
+    symbol: Symbol | None = None
+    extraction_method: ExtractionMethod
+    confidence: Ratio = Field(ge=0, le=1)
+
+    evidence: EvidenceSnippet | None = None
+    model_version: str | None = None
+
+    @model_validator(mode="after")
+    def certainty_requires_attribution(self) -> NewsEntityMention:
+        """Only the source's own attribution may be certain.
+
+        A dictionary match on 「台積」 is strong and still an inference — the
+        string occurs inside other names and beside prices. A confidence of
+        exactly 1 from an inference is a number nothing downstream can discount,
+        so the type refuses to represent it.
+        """
+        attributed = self.extraction_method is ExtractionMethod.SOURCE_ATTRIBUTED
+        if self.confidence == 1 and not attributed:
+            raise ValueError(
+                f"confidence 1.0 requires extraction_method=SOURCE_ATTRIBUTED, "
+                f"not {self.extraction_method}"
+            )
+        if not attributed and self.evidence is None:
+            raise ValueError("an inferred mention must carry the evidence it was inferred from")
+        return self
+
+
+class NewsStockLink(_Base):
+    """The claim that a story is about a company, with the reason for it.
+
+    `evidence` is required and must be non-empty. A link that cannot show its
+    working is one nobody can disagree with, and an inference nobody can
+    disagree with is how a supply-chain hop becomes a fact.
+    """
+
+    symbol: Symbol
+    market: Market = Market.TWSE
+
+    relation_type: RelationType
+    hop_count: int = Field(default=0, ge=0, le=5)
+
+    impact_score: Ratio = Field(ge=0, le=1)
+    impact_direction: int = Field(ge=-1, le=1)
+    confidence: Ratio = Field(ge=0, le=1)
+    sentiment: Ratio | None = Field(default=None, ge=-1, le=1)
+    time_horizon: TimeHorizon = TimeHorizon.SHORT
+
+    evidence: list[EvidenceSnippet] = Field(min_length=1)
+    #: The path through the supply chain, where the link was propagated rather
+    #: than observed. Empty for a direct mention.
+    path: list[str] = Field(default_factory=list)
+    rule: str = Field(min_length=1)
+
+    provenance: Provenance
+
+    @model_validator(mode="after")
+    def direct_means_zero_hops(self) -> NewsStockLink:
+        """A story naming a company is not a story about its supplier.
+
+        Without this, propagation is invisible: a second-hop inference stored as
+        DIRECT looks exactly like the company being named, and the difference is
+        the entire basis for discounting it.
+        """
+        mismatched = (self.relation_type is RelationType.DIRECT) != (self.hop_count == 0)
+        if mismatched and self.relation_type is not RelationType.MACRO:
+            raise ValueError(
+                f"{self.relation_type} with hop_count={self.hop_count}: DIRECT means "
+                f"zero hops and zero hops means DIRECT"
+            )
+        if self.hop_count > 0 and not self.path:
+            raise ValueError("a propagated link must record the path it travelled")
+        return self
+
+
+class NewsEventTag(_Base):
+    """What kind of event a story reports, and when it happened.
+
+    `event_time` is separate from the document's `published_at` because they are
+    different facts: an exchange announcement routinely reports something that
+    occurred days earlier. A study of what the market did on the news uses the
+    publication time; a study of what the company did uses the event time.
+    """
+
+    event_type: str = Field(min_length=1, max_length=40)
+    event_subtype: str | None = None
+    severity: Ratio | None = Field(default=None, ge=0, le=1)
+    confidence: Ratio = Field(ge=0, le=1)
+    event_time: datetime | None = None
+    classification_method: ExtractionMethod
+    provenance: Provenance
+
+
 class InstitutionalFlow(_Base):
     symbol: Symbol
     market: Market
@@ -329,6 +474,8 @@ class AIStockScore(_Base):
 __all__ = [
     "AIStockScore",
     "DataSource",
+    "EvidenceSnippet",
+    "ExtractionMethod",
     "FactorScore",
     "FinancialFact",
     "HistoricalPrice",
@@ -336,10 +483,14 @@ __all__ = [
     "Market",
     "MarketQuote",
     "NewsDocument",
+    "NewsEntityMention",
+    "NewsEventTag",
+    "NewsStockLink",
     "Provenance",
     "RelationType",
     "ScoreContribution",
     "StatementType",
     "Symbol",
+    "TimeHorizon",
     "Timeframe",
 ]

@@ -43,6 +43,7 @@ from app.providers.base import (
     ProviderHealth,
     ProviderResult,
 )
+from app.providers.http import JsonFetcher
 
 
 class CorporateActionRecord(TypedDict):
@@ -129,7 +130,41 @@ class CorporateActionProvider(ABC):
     #: as a coverage gap until someone establishes otherwise.
     history_starts: date | None = None
 
+    #: Longest span this source will answer in one request, if it has a limit.
+    #: Measured, not guessed: TWSE's capital reduction endpoint returns a
+    #: year-to-date in about three seconds, a full year in thirty, and eight
+    #: years not at all — it simply stops responding. A caller that does not
+    #: chunk gets a timeout, and a timeout on a backfill looks like an outage
+    #: rather than like a query that was too greedy.
+    max_query_days: int | None = None
+
     capabilities: frozenset[Capability] = frozenset({Capability.CORPORATE_ACTIONS})
+
+    def __init__(self, *, fetcher: JsonFetcher | None = None) -> None:
+        """`fetcher` is the transport seam, and it is part of the contract.
+
+        Replay substitutes here and nowhere else, so a recorded response runs
+        through the real parser, the real `supported_actions` and the real error
+        taxonomy. Putting the seam one layer up — a whole replay *provider* —
+        would mean the replayed run proves nothing about the code that talks to
+        the exchange.
+
+        It lives on the base class rather than on each implementation because
+        the registry constructs providers generically: an implementation that
+        quietly did not accept a transport would fail only in replay mode, which
+        is exactly the mode nobody watches.
+        """
+        self._fetcher = fetcher
+
+    @property
+    def fetcher(self) -> JsonFetcher:
+        if self._fetcher is None:
+            raise ProviderError(
+                ProviderErrorKind.CONFIG_ERROR,
+                f"{self.code} was constructed without a transport",
+                source=self.code,
+            )
+        return self._fetcher
 
     def supports(self, action_type: CorporateActionType) -> bool:
         return action_type in self.supported_actions
